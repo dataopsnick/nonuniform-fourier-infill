@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=61.0.0", "wheel", "Cython>=3.0.0", "numpy>=1.20.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nufi"
+version = "0.1.0"
+description = "A high-performance, GPU-accelerated non-uniform Fourier infilling library"
+readme = "README.md"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+dependencies = [
+    "numpy>=1.20.0",
+    "scipy>=1.6.0",
+    "pandas>=1.2.0",
+    "scikit-learn>=1.0.0",
+    "torch>=2.0.0"
+]
+
+[tool.setuptools]
+packages = ["nufi", "nufi.kernels"]

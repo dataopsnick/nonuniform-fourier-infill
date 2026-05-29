@@ -1,0 +1,81 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{geometry}
+\geometry{margin=1in}
+
+\title{\textbf{Non-Uniform Fourier Infilling (NUFI): Covariance and Derivative Preserving Time-Series Imputation}}
+\author{\textbf{NUFI Research Group} \\ Department of Quantitative Research and Engineering}
+\date{May 2026}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Missing value imputation in non-uniformly sampled, multi-dimensional time series represents a significant challenge in modern data mining, particularly in finance, astrophysics, and industrial IoT. Standard techniques such as linear or spline interpolations introduce sharp artifacts that degrade the signal's first, second, and higher-order derivatives. In this paper, we present \textbf{Non-Uniform Fourier Infilling (NUFI)}, a high-performance, GPU-accelerated framework that leverages Non-Uniform Discrete Fourier Transforms (NUDFT) to reconstruct continuous-time representations. By expressing the signal as a linear combination of smooth trigonometric basis functions, NUFI guarantees infinitely differentiable ($C^\infty$) derivative preservation. Furthermore, we introduce an LDLᵀ-based covariance compensation scheme to preserve cross-signal correlation, a Tikhonov ($L_2$) regularized solver, an $O(N \log N)$ Conjugate Gradient (CG) iterative solver for scalability, and a stochastic multiple imputation strategy to quantify infilling uncertainty.
+\end{abstract}
+
+\section{Introduction}
+Real-world sensors, financial markets, and logging systems frequently record observations at irregular or non-uniform time intervals. When analyzing such panel data, missing values (NaNs) are common. Standard imputation methods like linear interpolation or nearest-neighbor fail to preserve the statistical characteristics of the underlying physical or financial processes. Specifically:
+\begin{enumerate}
+    \item They introduce discontinuities in the derivatives of the signals.
+    \item They damp the signal variance and distort the cross-channel covariance matrix.
+\end{enumerate}
+
+To solve these issues, we present a mathematically rigorous spectral infilling approach called \textbf{NUFI}, implemented using PyTorch, Apple Silicon, and CUDA acceleration.
+
+\section{Mathematical Formulation}
+
+\subsection{Non-Uniform Discrete Fourier Transform (NUDFT)}
+Given a non-uniformly sampled sequence of observations $y_n = x(t_n)$ at timestamps $t_n$ for $n \in \{0, 1, \dots, N-1\}$, the forward Non-Uniform Discrete Fourier Transform is formulated as:
+\begin{equation}
+F_k = \frac{1}{N} \sum_{n=0}^{N-2} y_n \exp\left(-2\pi i p_n f_k\right)
+\end{equation}
+where $p_n = t_{n+1} - t_n$ represents the non-uniform sampling intervals, and $f_k$ denotes the frequency bins mapped up to the Nyquist frequency determined by the minimum sampling rate:
+\begin{equation}
+f_{\text{nyquist}} = \frac{1}{2 \min_n(p_n)}
+\end{equation}
+
+\subsection{Smooth Reconstruction & Derivative Preservation}
+We reconstruct the continuous-time signal $x(t)$ at any arbitrary timestamp $t$ by evaluating the inverse NUDFT:
+\begin{equation}
+x(t) = \text{Re} \left( \sum_{k=0}^{N-1} F_k \exp\left(2\pi i f_k t\right) \right)
+\end{equation}
+Because the basis functions $\exp\left(2\pi i f_k t\right)$ are infinitely differentiable, the reconstructed signal $x(t) \in C^\infty$. The first and second derivatives are analytically continuous:
+\begin{equation}
+x'(t) = \text{Re} \left( \sum_{k=0}^{N-1} 2\pi i f_k F_k \exp\left(2\pi i f_k t\right) \right)
+\end{equation}
+\begin{equation}
+x''(t) = \text{Re} \left( \sum_{k=0}^{N-1} -4\pi^2 f_k^2 F_k \exp\left(2\pi i f_k t\right) \right)
+\end{equation}
+
+\subsection{LDLᵀ Covariance Compensation}
+To maintain the cross-channel covariance structure across multiple variables, we compute the covariance matrix of the forward frequency components $\Sigma$. We then compute the LDLᵀ factorization:
+\begin{equation}
+\Sigma = P L D L^T
+\end{equation}
+where $P$ is a permutation matrix, $L$ is a lower unit triangular matrix, and $D$ is a diagonal matrix. The diagonal entries $D_{ii}$ represent the independent orthogonal variances of the joint spectral process. By scaling the reconstructed time-domain signals by the spectral standard deviations $\sqrt{|D_{ii}|}$, we guarantee that the reconstructed joint signal preserves the original covariance of the observed dataset.
+
+\section{Advanced Algorithms}
+
+\subsection{Tikhonov (L2) Regularization}
+To prevent ill-conditioning when timestamps are highly clustered, we regularize the frequency coefficients by solving:
+\begin{equation}
+\min_F \| A F - y \|_2^2 + \alpha \| F \|_2^2
+\end{equation}
+where $A_{n,k} = \exp(2\pi i f_k t_n)$ is the non-uniform Fourier matrix, and $\alpha$ is the regularization parameter.
+
+\subsection{Conjugate Gradient (CG) Iterative Solver}
+For massive datasets ($N > 10^5$), direct matrix inversion is $O(N^3)$, which is prohibitive. We implement an iterative Conjugate Gradient (CG) solver that computes matrix-vector products $A^H A p$ in $O(N \log N)$ utilizing fast interpolated FFT operations.
+
+\subsection{Stochastic Multiple Imputation}
+Instead of imputing only the deterministic mean reconstruction, we allow sampling from the posterior process to represent uncertainty:
+\begin{equation}
+x_{\text{stochastic}}(t) = x_{\text{mean}}(t) + \epsilon(t) \cdot \sqrt{|D_{ii}|}
+\end{equation}
+where $\epsilon(t) \sim \mathcal{N}(0, \sigma^2)$ represents the residual stochastic process.
+
+\end{document}
