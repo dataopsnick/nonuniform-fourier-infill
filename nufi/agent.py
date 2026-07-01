@@ -58,10 +58,15 @@ class TransformationTracker:
         filepath = os.path.join(self.history_dir, filename)
         
         with self._lock:
-            # Write log entry *before* CSV to enable orphan detection
+            # Write CSV first (if it fails, no log pollution)
+            try:
+                df.to_csv(filepath, index=True)
+            except Exception as e:
+                raise TransformationLoggingError(f"Failed to save data snapshot {filepath}: {e}")
+            # Log only after successful write to avoid orphan entries
             log_entry = {
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "event": "snapshot_saving",
+                "event": "snapshot_saved",
                 "version_id": version_id,
                 "step_name": step_name,
                 "columns": list(df.columns),
@@ -72,10 +77,6 @@ class TransformationTracker:
                 self.log_transformation(log_entry)
             except Exception as e:
                 raise TransformationLoggingError(f"Failed to write to transformation log: {e}")
-            try:
-                df.to_csv(filepath, index=True)
-            except Exception as e:
-                raise TransformationLoggingError(f"Failed to save data snapshot {filepath}: {e}")
         return version_id
 
     def list_versions(self) -> list:
@@ -227,15 +228,17 @@ def impute_dataframe(
                 f"or ensure your index contains numeric values."
             )
 
-    raw_timestamps = df_copy.index.to_numpy(dtype=np.float64)
-    max_ts = np.max(np.abs(raw_timestamps)) if len(raw_timestamps) > 0 else 0
+    timestamps = df_copy.index.to_numpy(dtype=np.float64)
+    max_ts = np.max(np.abs(timestamps)) if len(timestamps) > 0 else 0
     if max_ts > 2**53:
         import warnings
+        # Subtract epoch to preserve relative precision in float64
+        epoch = timestamps[0] if len(timestamps) > 0 else 0.0
+        timestamps = timestamps - epoch
         warnings.warn(
             f"Timestamps exceed float64 precision (max={max_ts:.1e}). "
-            f"Consider normalizing by subtracting an epoch to preserve relative precision."
+            f"Normalized by subtracting epoch={epoch} to preserve relative precision."
         )
-    timestamps = raw_timestamps
 
     # Initialize and fit NufiImputer
     imputer = NufiImputer(
@@ -283,8 +286,8 @@ def impute_dataframe(
             }
             continue
 
-        opt_alpha = imputer.alphas_[col_idx] if hasattr(imputer, 'alphas_') and col_idx < len(imputer.alphas_) else 1e-4
-        n_f = imputer.n_frequencies_[col_idx] if hasattr(imputer, 'n_frequencies_') and col_idx < len(imputer.n_frequencies_) else len(col_data)
+        opt_alpha = imputer.alphas_[col_idx] if col_idx < len(imputer.alphas_) else 1e-4
+        n_f = imputer.n_frequencies_[col_idx] if col_idx < len(imputer.n_frequencies_) else len(col_data)
 
         p_n = np.diff(v_timestamps) if len(v_timestamps) > 1 else [1.0]
         min_p = np.nanmin(p_n) if len(p_n) > 0 and np.nanmin(p_n) > 0 else 1.0
@@ -463,7 +466,9 @@ def plot_diagnostics(
     if num_cols == 0:
         import warnings
         warnings.warn("No columns to plot. Returning empty figure.")
-        return
+        fig, axes = plt.subplots(1, 1, figsize=(8, 4))
+        axes = np.array([[axes]])
+        return fig, axes
     fig, axes = plt.subplots(num_cols, 2, figsize=(14, 4 * num_cols), squeeze=False)
 
     for idx, col_name in enumerate(columns):

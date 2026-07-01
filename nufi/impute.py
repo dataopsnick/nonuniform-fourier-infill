@@ -106,7 +106,7 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                         y_complex = t_data.to(torch.complex128)
                         y_tilde = torch.matmul(U.adjoint(), y_complex)
                         y_norm_sq = torch.sum(torch.abs(y_complex) ** 2)
-                except Exception as e:
+                except (RuntimeError, torch.linalg.LinAlgError, ValueError) as e:
                     import warnings
                     warnings.warn(f"SVD failed for column {col_idx}, n_f={n_f}: {e}. Skipping candidate.")
                     continue
@@ -154,7 +154,8 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                 self.perm_ = np.arange(n_cols)
                 
                 # Filter valid_cols using valid_idx_comp to handle degenerate columns dropped
-                actual_valid_cols = [valid_cols[idx] for idx in valid_idx_comp]
+                signal_valid_idx = np.unique(valid_idx_comp // 2)
+                actual_valid_cols = [valid_cols[idx] for idx in signal_valid_idx]
                 
                 for i, c_i in enumerate(actual_valid_cols):
                     self.perm_[c_i] = actual_valid_cols[perm_small[i]]
@@ -197,6 +198,7 @@ class NufiImputer(BaseEstimator, TransformerMixin):
         dev = get_device(self.device)
         
         infilled_data = np.zeros_like(X_data)
+        # Note: these dictionaries store per-column full-length arrays and may be large for many-column datasets.
         self.reconstructed_ = {}
         self.coefficients_ = {}
         

@@ -86,7 +86,7 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
             "Covariance Error (Frobenius)": float(nufi_cov_err),
             "Runtime (s)": float(nufi_time)
         }
-    except Exception as e:
+    except (ValueError, RuntimeError, ImportError) as e:
         import traceback
         print(f"[WARN] NUFI benchmark failed: {e}")
         traceback.print_exc()

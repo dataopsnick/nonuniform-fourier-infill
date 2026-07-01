@@ -76,7 +76,7 @@ else:
             "/opt/homebrew/opt/libomp",   # Apple Silicon Homebrew
             "/usr/local/opt/libomp",       # Intel Homebrew
             "/opt/local/lib/libomp",       # MacPorts
-            os.path.join(sys.prefix, "lib"),  # conda / virtualenv
+            sys.prefix,  # conda / virtualenv (include/ and lib/ live directly under prefix)
             "/usr/local",
             "/usr",
         ]
@@ -151,7 +151,7 @@ setup(
     version="0.1.0",
     packages=["nufi", "nufi.kernels"],
     ext_modules=cythonize(extensions, compiler_directives={"language_level": "3"}),
-    python_requires=">=3.8",
+    python_requires=">=3.9",
     install_requires=[
         "numpy>=1.20.0",
     ],

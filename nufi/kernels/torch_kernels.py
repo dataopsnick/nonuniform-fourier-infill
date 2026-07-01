@@ -69,10 +69,11 @@ def compute_ND_NUDFT(X_list, device=None):
         # Guard against excessive memory for large N
         MAX_MEM_N = 10_000
         if N > MAX_MEM_N:
-            raise MemoryError(
-                f"N={N} exceeds MAX_MEM_N={MAX_MEM_N}; compute_ND_NUDFT would allocate "
-                f"a ({len(v_timestamps)} × {N}) complex tensor. "
-                f"Use compute_Fast_ND_NUDFT or reduce N."
+            import warnings
+            warnings.warn(
+                f"N={N} exceeds MAX_MEM_N={MAX_MEM_N}; compute_ND_NUDFT may consume "
+                f"excessive memory ({len(v_timestamps)} × {N} complex tensor). "
+                f"Consider using compute_Fast_ND_NUDFT or reduce N."
             )
 
         exponent = -2.0j * np.pi * t_timestamps.unsqueeze(1) * f_k.unsqueeze(0)
@@ -173,7 +174,7 @@ def covariance_compensation(X_list, device=None):
     except Exception:
         raise ValueError("LDL decomposition failed; covariance matrix may be singular.")
 
-    return lu, d, perm, valid_idx
+    return lu, d, perm, valid_idx  # returns covariance-matrix indices (length up to 2*M); caller must map to signal space via // 2
 
 def solve_cg(A, b, alpha, max_iter=100, tol=1e-5):
     """
