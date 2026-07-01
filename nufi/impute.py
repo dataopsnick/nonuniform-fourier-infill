@@ -118,6 +118,12 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                     best_n_freq = n_f
                     best_alpha = opt_alpha
             
+            if best_gcv == float('inf'):
+                import warnings
+                warnings.warn(
+                    f"All GCV candidates failed SVD for column {col_idx}. "
+                    f"Using fallback n_f={best_n_freq}, alpha={best_alpha}."
+                )
             self.alphas_.append(best_alpha)
             self.n_frequencies_.append(best_n_freq)
             
@@ -140,16 +146,24 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             if len(X_list) > 0:
                 lu_small, d_small, perm_small = covariance_compensation(X_list, device=self.device)
                 
-                # Expand to full size
+                # Expand to full size; apply inverse permutation for correct column alignment
                 self.lu_ = np.eye(n_cols)
                 self.d_ = np.eye(n_cols)
+                inv_perm = np.argsort(perm_small)
                 self.perm_ = np.arange(n_cols)
                 
-                # Map small matrices back to full size
+                # Map small matrices back to full size using perm_small mapping
+                if d_small.ndim == 1:
+                    for i, c_i in enumerate(valid_cols):
+                        self.d_[valid_cols[perm_small[i]], valid_cols[perm_small[i]]] = d_small[i]
+                else:
+                    for i, c_i in enumerate(valid_cols):
+                        for j, c_j in enumerate(valid_cols):
+                            self.d_[valid_cols[perm_small[i]], valid_cols[perm_small[j]]] = d_small[i, j]
+                
                 for i, c_i in enumerate(valid_cols):
                     for j, c_j in enumerate(valid_cols):
-                        self.lu_[c_i, c_j] = lu_small[i, j]
-                        self.d_[c_i, c_j] = d_small[i, j]
+                        self.lu_[valid_cols[perm_small[i]], valid_cols[perm_small[j]]] = lu_small[i, j]
             else:
                 self.lu_ = np.eye(n_cols)
                 self.d_ = np.eye(n_cols)
@@ -177,6 +191,8 @@ class NufiImputer(BaseEstimator, TransformerMixin):
         dev = get_device(self.device)
         
         infilled_data = np.zeros_like(X_data)
+        
+        rng = np.random.RandomState(self.random_state) if self.random_state is not None else np.random
         
         for col_idx in range(X_data.shape[1]):
             col_data = X_data[:, col_idx]
@@ -236,7 +252,6 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                         residual_std = 0.1
                         
                     # Generate noise from posterior process scaled by uncertainty parameters
-                    rng = np.random.RandomState(self.random_state) if self.random_state is not None else np.random
                     noise = rng.normal(0, stochastic_scale * residual_std, size=nan_mask.sum())
                     
                     if self.covariance_compensation and self.d_ is not None and cov_scale > 0:

@@ -19,13 +19,16 @@ class TransformationTracker:
     Manages append-only transformation logging and snapshot-based dataframe version tracking.
     Saves snapshots under '.nufi_history/' and logs actions to 'nufi_transformations.log'.
     """
-    _lock = threading.Lock()
 
     def __init__(self, log_path: str = "nufi_transformations.log", history_dir: str = ".nufi_history"):
-        if ".." in os.path.normpath(log_path) or ".." in os.path.normpath(history_dir):
-            raise ValueError("Path traversal detected in log_path or history_dir.")
-        self.log_path = os.path.abspath(log_path)
-        self.history_dir = os.path.abspath(history_dir)
+        self.log_path = os.path.realpath(log_path)
+        self.history_dir = os.path.realpath(history_dir)
+        cwd = os.path.realpath(os.getcwd())
+        if not self.log_path.startswith(cwd + os.sep) and self.log_path != cwd:
+            raise ValueError(f"log_path must be within current working directory: {log_path}")
+        if not self.history_dir.startswith(cwd + os.sep) and self.history_dir != cwd:
+            raise ValueError(f"history_dir must be within current working directory: {history_dir}")
+        self._lock = threading.Lock()
         
         with self._lock:
             try:
@@ -77,12 +80,13 @@ class TransformationTracker:
                 versions = []
                 for f in files:
                     parts = f.split("_")
-                    if len(parts) >= 4:
+                    # Detect new format: ver_{ts}_{uuid8}_{step_name}.csv
+                    if len(parts) >= 4 and len(parts[2]) == 8 and all(c in '0123456789abcdef' for c in parts[2]):
                         version_id = f"{parts[0]}_{parts[1]}_{parts[2]}"
                         step_name = "_".join(parts[3:]).replace(".csv", "")
-                    elif len(parts) == 3:
+                    elif len(parts) >= 3:
                         version_id = f"{parts[0]}_{parts[1]}"
-                        step_name = parts[2].replace(".csv", "")
+                        step_name = "_".join(parts[2:]).replace(".csv", "")
                     else:
                         version_id = parts[0]
                         step_name = parts[1].replace(".csv", "")

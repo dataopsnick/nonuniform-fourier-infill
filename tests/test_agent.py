@@ -1,7 +1,6 @@
 import os
 import shutil
 import unittest
-import json
 import numpy as np
 import pandas as pd
 from unittest.mock import patch, mock_open
@@ -71,10 +70,12 @@ class TestAgentNativeLayer(unittest.TestCase):
         self.assertTrue(any("post_infill" in f for f in csv_files))
 
     def test_impute_dataframe_empty(self):
-        """Edge case: empty DataFrame should raise or return gracefully."""
+        """Edge case: empty DataFrame should return gracefully with diagnostics."""
         empty_df = pd.DataFrame(columns=["timestamp", "signal"])
-        with self.assertRaises(ValueError):
-            impute_dataframe(empty_df, time_col="timestamp")
+        result_df, diagnostics = impute_dataframe(empty_df, time_col="timestamp")
+        self.assertTrue(result_df.empty)
+        self.assertIn("signal", diagnostics)
+        self.assertIn("NO_OBSERVATIONS", diagnostics["signal"]["stability_flags"])
 
     def test_impute_dataframe_all_nan(self):
         """Edge case: column with all NaN values."""

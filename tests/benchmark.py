@@ -95,7 +95,7 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
     try:
         spline_infilled = df_masked.interpolate(method='cubic', axis=0)
         # Fill any remaining NaNs with linear fallback and backward/forward fill
-        spline_infilled = spline_infilled.interpolate(method='linear', axis=0).fillna(method='ffill').fillna(method='bfill')
+        spline_infilled = spline_infilled.interpolate(method='linear', axis=0).ffill().bfill()
         spline_time = time.time() - start
         
         spline_rmse = np.sqrt(np.mean((df_truth.to_numpy() - spline_infilled.to_numpy()) ** 2))

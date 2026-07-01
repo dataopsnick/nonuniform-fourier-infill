@@ -19,6 +19,9 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False):
         Whether to keep the time column as a feature in the DataFrame columns
         passed to the imputer. If False, the time column is set as the index and
         removed from the features.
+        Note: When keep_time_col=True, the time column is duplicated as both the DataFrame index
+        and a regular feature column. The imputer will fit/transform it like any other column,
+        which may distort covariance estimation if timestamp values differ in scale.
     """
     try:
         import cudf
@@ -41,6 +44,9 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False):
             time_values = pd_df[time_col].copy()
             pd_df = pd_df.set_index(time_col)
             pd_df[time_col] = time_values
+            # Note: the time column is now both the index and a feature column.
+            # The imputer will fit/transform it like any other column, which may
+            # distort covariance estimation if timestamp values differ in scale.
         else:
             pd_df = pd_df.set_index(time_col)
         
@@ -54,7 +60,6 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False):
         )
     
     if is_cudf:
-        import cudf
         return cudf.DataFrame.from_pandas(infilled_pd)
     return infilled_pd
 
@@ -76,6 +81,8 @@ def infill_multiindex_dataframe(df, imputer=None, entity_level=0, time_level=1, 
         The level of the MultiIndex representing timestamps.
     sort : bool, default True
         Whether to sort the index by time level to ensure proper chronological order.
+        Setting sort=False when timestamps are not already sorted may produce
+        incorrect results due to Nyquist frequency miscalculation.
         Note: This reorders the group's rows; the output index order will reflect the sorted
         order, not the original input order.
     """
@@ -126,6 +133,5 @@ def infill_multiindex_dataframe(df, imputer=None, entity_level=0, time_level=1, 
     infilled_pd = grouped.apply(imputer_apply)
     
     if is_cudf:
-        import cudf
         return cudf.DataFrame.from_pandas(infilled_pd)
     return infilled_pd

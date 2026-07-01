@@ -141,7 +141,7 @@ def test_stochastic_imputation():
         [5.0]
     ], dtype=np.float64)
     
-    imputer = NufiImputer(method='direct', alpha=1e-4, covariance_compensation=False, random_state=42)
+    imputer = NufiImputer(method='direct', alpha=1e-4, covariance_compensation=False)
     imputer.fit(X)
     
     X_filled_1 = imputer.transform(X, stochastic=True, stochastic_scale=1.5)

@@ -18,10 +18,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gpu = ["torch>=2.0.0"]
-
-[tool.setuptools]
-packages = ["find:auto"]
+gpu = ["torch>=2.0.0", "nvidia-cublas-cu12"]
 
 [tool.setuptools.packages.find]
 include = ["nufi*"]
