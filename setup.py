@@ -87,8 +87,10 @@ else:
         libomp_path = None
         for candidate in libomp_candidates:
             if candidate and os.path.isdir(os.path.join(candidate, "include")):
-                libomp_path = candidate
-                break
+                # Ensure we have omp.h to avoid matching sys.prefix false positives
+                if os.path.exists(os.path.join(candidate, "include", "omp.h")):
+                    libomp_path = candidate
+                    break
         if libomp_path:
             ext_compiler_args = ["-Xpreprocessor", "-fopenmp"]
             ext_linker_args = ["-L" + os.path.join(libomp_path, "lib"), "-lomp"]

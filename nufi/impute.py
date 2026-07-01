@@ -153,9 +153,9 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                 self.d_ = np.eye(n_cols)
                 self.perm_ = np.arange(n_cols)
                 
-                # Filter valid_cols using valid_idx_comp to handle degenerate columns dropped
-                signal_valid_idx = np.unique(valid_idx_comp // 2)
-                actual_valid_cols = [valid_cols[idx] for idx in signal_valid_idx]
+                # Filter valid_cols using valid_idx_comp to handle degenerate columns dropped.
+                # valid_idx_comp references the doubled (real+imag) space; map back via // 2.
+                actual_valid_cols = [valid_cols[idx // 2] for idx in valid_idx_comp]
                 
                 for i, c_i in enumerate(actual_valid_cols):
                     self.perm_[c_i] = actual_valid_cols[perm_small[i]]
