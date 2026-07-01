@@ -96,7 +96,8 @@ def test_tikhonov_direct_and_cg_solvers():
     assert X_cg[0, 0] == 2.0
     
     # Assert direct and CG solvers produce consistent/similar imputations (Task 20)
-    assert np.allclose(X_direct, X_cg, atol=1e-2)
+    # Tighten tolerance to better detect solver discrepancies
+    assert np.allclose(X_direct, X_cg, atol=1e-4)
 
 def test_gcv_tuning():
     # Verify that the GCV auto-tuning logic works for alpha and n_frequencies
@@ -114,8 +115,8 @@ def test_gcv_tuning():
     X_filled = imputer.fit_transform(X)
     
     assert not np.any(np.isnan(X_filled))
-    assert len(imputer.alphas_) == 2
-    assert len(imputer.n_frequencies_) == 2
+    assert len(imputer.alphas_) == X.shape[1]
+    assert len(imputer.n_frequencies_) == X.shape[1]
     for alpha in imputer.alphas_:
         assert alpha > 0
     for n_freq in imputer.n_frequencies_:
@@ -159,6 +160,13 @@ def test_stochastic_imputation():
     # Missing spots should have different stochastic values
     assert X_filled_1[1, 0] != X_filled_2[1, 0]
     assert X_filled_1[3, 0] != X_filled_2[3, 0]
+    
+    # With fixed random_state: calls should be reproducible
+    imputer_seeded = NufiImputer(method='direct', alpha=1e-4, covariance_compensation=False, random_state=42)
+    imputer_seeded.fit(X)
+    X_seeded_1 = imputer_seeded.transform(X, stochastic=True, stochastic_scale=1.5)
+    X_seeded_2 = imputer_seeded.transform(X, stochastic=True, stochastic_scale=1.5)
+    assert np.array_equal(X_seeded_1, X_seeded_2)
 
 def test_stochastic_imputation_multicol():
     # Verify multi-column stochastic imputation maintains valid cross-column relationships (Task 19)
@@ -171,12 +179,19 @@ def test_stochastic_imputation_multicol():
     ], dtype=np.float64)
     
     imputer = NufiImputer(method='direct', alpha=1e-4, covariance_compensation=True, random_state=42)
-    X_filled = imputer.fit_transform(X, stochastic=True)
+    imputer.fit(X)
+    X_filled = imputer.transform(X, stochastic=True)
     
     assert not np.any(np.isnan(X_filled))
     # Values should be reasonable
     assert np.all(X_filled[:, 0] >= 0.0)
     assert np.all(X_filled[:, 1] >= 0.0)
+    # Cross-column: ratio between columns should be approximately preserved
+    obs_mask = ~np.isnan(X).any(axis=1)
+    if obs_mask.sum() >= 2:
+        observed_ratio = X[obs_mask, 0] / X[obs_mask, 1]
+        filled_ratio = X_filled[~obs_mask, 0] / X_filled[~obs_mask, 1]
+        assert np.allclose(np.mean(filled_ratio), np.mean(observed_ratio), rtol=0.5)
 
 def test_imputer_edge_cases():
     # Task 22: Missing edge cases
@@ -206,4 +221,4 @@ def test_imputer_edge_cases():
     # 4. Invalid parameters: negative/zero alpha should raise ValueError
     with pytest.raises(ValueError):
         bad_imputer = NufiImputer(alpha=-1.0)
-        bad_imputer.fit_transform(X_all_nan)
+        bad_imputer.fit_transform(X_no_nans)

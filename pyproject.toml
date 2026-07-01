@@ -18,9 +18,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Consider: if torch should be optional for CPU-only mode, move it from `dependencies` to this extra.
-# Otherwise, remove this extra or list actual GPU-specific packages.
-gpu = ["nvidia-cublas-cu12"]
+# Let torch supply its own CUDA runtime; avoid version conflicts.
+# GPU users simply need a CUDA-capable torch wheel (e.g., `pip install torch --index-url https://download.pytorch.org/whl/cu118`).
+gpu = []
 
 [tool.setuptools.packages.find]
 include = ["nufi*"]

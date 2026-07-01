@@ -23,16 +23,17 @@ class TransformationTracker:
 
     def __init__(self, log_path: str = "nufi_transformations.log", history_dir: str = ".nufi_history"):
         safe_root = os.path.realpath(os.getcwd())
-        resolved_log = os.path.realpath(log_path)
-        resolved_hist = os.path.realpath(history_dir)
-        for path, resolved in ((log_path, resolved_log), (history_dir, resolved_hist)):
+        # Resolve paths and validate immediately:
+        for p in (log_path, history_dir):
+            resolved = os.path.realpath(p)
             try:
                 if os.path.commonpath([safe_root, resolved]) != safe_root:
-                    raise ValueError(f"Path {path} is outside the allowed directory.")
+                    raise ValueError(f"Path {p} is outside the allowed directory.")
             except ValueError:
-                raise ValueError(f"Path {path} is outside the allowed directory (possibly on a different drive).")
-        self.log_path = resolved_log
-        self.history_dir = resolved_hist
+                raise ValueError(f"Path {p} is outside the allowed directory (possibly on a different drive).")
+        # Store resolved paths (these are canonical and safe for writes)
+        self.log_path = os.path.realpath(log_path)
+        self.history_dir = os.path.realpath(history_dir)
         self._lock = threading.RLock()
         
         with self._lock:
@@ -57,14 +58,10 @@ class TransformationTracker:
         filepath = os.path.join(self.history_dir, filename)
         
         with self._lock:
-            try:
-                df.to_csv(filepath, index=True)
-            except Exception as e:
-                raise TransformationLoggingError(f"Failed to save data snapshot {filepath}: {e}")
-            
+            # Write log entry *before* CSV to enable orphan detection
             log_entry = {
                 "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "event": "snapshot_saved",
+                "event": "snapshot_saving",
                 "version_id": version_id,
                 "step_name": step_name,
                 "columns": list(df.columns),
@@ -74,12 +71,11 @@ class TransformationTracker:
             try:
                 self.log_transformation(log_entry)
             except Exception as e:
-                # Rollback: remove orphaned CSV on log failure
-                try:
-                    os.remove(filepath)
-                except OSError:
-                    pass
                 raise TransformationLoggingError(f"Failed to write to transformation log: {e}")
+            try:
+                df.to_csv(filepath, index=True)
+            except Exception as e:
+                raise TransformationLoggingError(f"Failed to save data snapshot {filepath}: {e}")
         return version_id
 
     def list_versions(self) -> list:
@@ -116,18 +112,23 @@ class TransformationTracker:
 
     def revert_to_version(self, version_id: str) -> pd.DataFrame:
         """Loads and returns a saved dataframe snapshot of the specified version_id."""
-        versions = self.list_versions()
-        target = None
-        for v in versions:
-            if v["version_id"] == version_id:
-                target = v
-                break
-        if target is None:
-            raise ValueError(f"Version ID '{version_id}' not found in transformation history.")
-            
-        try:
-            with self._lock:
+        with self._lock:
+            versions = self.list_versions()
+            target = None
+            for v in versions:
+                if v["version_id"] == version_id:
+                    target = v
+                    break
+            if target is None:
+                raise ValueError(f"Version ID '{version_id}' not found in transformation history.")
+                
+            try:
+                if not os.path.exists(target["filepath"]):
+                    raise TransformationLoggingError(f"Snapshot file {target['filepath']} no longer exists.")
                 df = pd.read_csv(target["filepath"], index_col=0)
+                # Validate snapshot integrity
+                if df.empty:
+                    raise TransformationLoggingError(f"Snapshot {version_id} is empty or corrupted.")
             
                 # Log the reversion
                 log_entry = {
@@ -137,9 +138,9 @@ class TransformationTracker:
                     "step_name": target["step_name"]
                 }
                 self.log_transformation(log_entry)
-            return df
-        except Exception as e:
-            raise TransformationLoggingError(f"Failed to load or log reverted version {version_id}: {e}")
+                return df
+            except Exception as e:
+                raise TransformationLoggingError(f"Failed to load or log reverted version {version_id}: {e}")
 
 def impute_dataframe(
     df: pd.DataFrame,
@@ -226,7 +227,15 @@ def impute_dataframe(
                 f"or ensure your index contains numeric values."
             )
 
-    timestamps = df_copy.index.to_numpy(dtype=np.float64)
+    raw_timestamps = df_copy.index.to_numpy(dtype=np.float64)
+    max_ts = np.max(np.abs(raw_timestamps)) if len(raw_timestamps) > 0 else 0
+    if max_ts > 2**53:
+        import warnings
+        warnings.warn(
+            f"Timestamps exceed float64 precision (max={max_ts:.1e}). "
+            f"Consider normalizing by subtracting an epoch to preserve relative precision."
+        )
+    timestamps = raw_timestamps
 
     # Initialize and fit NufiImputer
     imputer = NufiImputer(
@@ -250,6 +259,9 @@ def impute_dataframe(
     # Generate JSON diagnostic metadata and column details
     diagnostics = {}
     dev = get_device(device)
+    if time_col is not None and list(df.columns).count(time_col) > 1:
+        raise ValueError(f"time_col '{time_col}' appears multiple times in DataFrame columns. "
+                         f"Ensure column names are unique.")
     columns = [c for c in df.columns if c != time_col]
     total_infilled_nans = int(df_copy[columns].isna().sum().sum())
 
@@ -271,8 +283,8 @@ def impute_dataframe(
             }
             continue
 
-        opt_alpha = imputer.alphas_[col_idx] if col_idx < len(imputer.alphas_) else 1e-4
-        n_f = imputer.n_frequencies_[col_idx] if col_idx < len(imputer.n_frequencies_) else len(col_data)
+        opt_alpha = imputer.alphas_[col_idx] if hasattr(imputer, 'alphas_') and col_idx < len(imputer.alphas_) else 1e-4
+        n_f = imputer.n_frequencies_[col_idx] if hasattr(imputer, 'n_frequencies_') and col_idx < len(imputer.n_frequencies_) else len(col_data)
 
         p_n = np.diff(v_timestamps) if len(v_timestamps) > 1 else [1.0]
         min_p = np.nanmin(p_n) if len(p_n) > 0 and np.nanmin(p_n) > 0 else 1.0
@@ -280,17 +292,21 @@ def impute_dataframe(
         nyquist_frequency = max_sampling_rate / 2.0
         f_k = np.linspace(0, nyquist_frequency, n_f)
 
-        F = solve_tikhonov_nudft(
-            v_timestamps, v_data, f_k, opt_alpha,
-            solver=solver, max_iter=max_iter, tol=tol, device=device
-        )
-        F_np = F.cpu().numpy()
+        if len(v_data) > 0 and hasattr(imputer, 'reconstructed_') and col_idx in imputer.reconstructed_:
+            reconstructed_np = imputer.reconstructed_[col_idx][valid_mask]
+            F_np = imputer.coefficients_[col_idx]
+        else:
+            F = solve_tikhonov_nudft(
+                v_timestamps, v_data, f_k, opt_alpha,
+                solver=solver, max_iter=max_iter, tol=tol, device=device
+            )
+            F_np = F.cpu().numpy()
 
-        t_f_k = torch.tensor(f_k, dtype=torch.float64, device=dev)
-        t_times = torch.tensor(v_timestamps, dtype=torch.float64, device=dev)
-        exponent = 2.0j * np.pi * t_times.unsqueeze(1) * t_f_k.unsqueeze(0)
-        reconstructed = torch.real(torch.sum(F.unsqueeze(0) * torch.exp(exponent), dim=1))
-        reconstructed_np = reconstructed.cpu().numpy()
+            t_f_k = torch.tensor(f_k, dtype=torch.float64, device=dev)
+            t_times = torch.tensor(v_timestamps, dtype=torch.float64, device=dev)
+            exponent = 2.0j * np.pi * t_times.unsqueeze(1) * t_f_k.unsqueeze(0)
+            reconstructed = torch.real(torch.sum(F.unsqueeze(0) * torch.exp(exponent), dim=1))
+            reconstructed_np = reconstructed.cpu().numpy()
 
         if imputer.covariance_compensation and imputer.d_ is not None:
             cov_scale = np.sqrt(np.abs(np.diag(imputer.d_)[col_idx]))
@@ -436,8 +452,18 @@ def plot_diagnostics(
 
     if columns is None:
         columns = list(orig_copy.columns)[:5]
+    else:
+        missing = [c for c in columns if c not in orig_copy.columns]
+        if missing:
+            import warnings
+            warnings.warn(f"Requested columns not found in DataFrame: {missing}")
+            columns = [c for c in columns if c in orig_copy.columns]
 
     num_cols = len(columns)
+    if num_cols == 0:
+        import warnings
+        warnings.warn("No columns to plot. Returning empty figure.")
+        return
     fig, axes = plt.subplots(num_cols, 2, figsize=(14, 4 * num_cols), squeeze=False)
 
     for idx, col_name in enumerate(columns):

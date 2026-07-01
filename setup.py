@@ -12,19 +12,51 @@ except ImportError:
 
 try:
     from Cython.Build import cythonize
+    from Cython import __version__ as cython_version
 except ImportError:
     raise ImportError(
         "Cython is required to build this package. "
         "Install it via: pip install cython>=3.0.0"
     )
+else:
+    try:
+        from packaging.version import Version
+        if Version(cython_version) < Version("3.0.0"):
+            raise ImportError(
+                f"Cython >= 3.0.0 is required, but {cython_version} is installed. "
+                "Upgrade via: pip install cython>=3.0.0"
+            )
+    except ImportError:
+        cy_parts = [int(x) for x in cython_version.split(".") if x.isdigit()]
+        if len(cy_parts) > 0 and cy_parts[0] < 3:
+            raise ImportError(
+                f"Cython >= 3.0.0 is required, but {cython_version} is installed. "
+                "Upgrade via: pip install cython>=3.0.0"
+            )
 
 try:
     import numpy as np
+    from numpy import __version__ as numpy_version
 except ImportError:
     raise ImportError(
         "NumPy is required to build this package. "
         "Install it via: pip install numpy>=1.20.0"
     )
+else:
+    try:
+        from packaging.version import Version
+        if Version(numpy_version) < Version("1.20.0"):
+            raise ImportError(
+                f"NumPy >= 1.20.0 is required, but {numpy_version} is installed. "
+                "Upgrade via: pip install numpy>=1.20.0"
+            )
+    except ImportError:
+        np_parts = [int(x) for x in numpy_version.split(".") if x.isdigit()]
+        if len(np_parts) >= 2 and (np_parts[0] < 1 or (np_parts[0] == 1 and np_parts[1] < 20)):
+            raise ImportError(
+                f"NumPy >= 1.20.0 is required, but {numpy_version} is installed. "
+                "Upgrade via: pip install numpy>=1.20.0"
+            )
 
 # Determine compiler flags for OpenMP (multi-threading support)
 ext_compiler_args = []
@@ -44,6 +76,9 @@ else:
             "/opt/homebrew/opt/libomp",   # Apple Silicon Homebrew
             "/usr/local/opt/libomp",       # Intel Homebrew
             "/opt/local/lib/libomp",       # MacPorts
+            os.path.join(sys.prefix, "lib"),  # conda / virtualenv
+            "/usr/local",
+            "/usr",
         ]
         # Also allow explicit override via environment variable
         env_libomp = os.environ.get("LIBOMP_ROOT") or os.environ.get("LIBOMP_PATH")
@@ -51,7 +86,7 @@ else:
             libomp_candidates.insert(0, env_libomp)
         libomp_path = None
         for candidate in libomp_candidates:
-            if candidate and os.path.isdir(candidate):
+            if candidate and os.path.isdir(os.path.join(candidate, "include")):
                 libomp_path = candidate
                 break
         if libomp_path:
@@ -60,7 +95,11 @@ else:
             ext_include_dirs.append(os.path.join(libomp_path, "include"))
         else:
             import warnings
-            warnings.warn("OpenMP not found. Install libomp via 'brew install libomp' for better performance.")
+            warnings.warn(
+                "OpenMP not found. Install libomp via 'brew install libomp' "
+                "or set the LIBOMP_ROOT environment variable to the libomp prefix. "
+                "Conda users can install via 'conda install llvm-openmp'."
+            )
             ext_compiler_args = []
             ext_linker_args = []
     else:
@@ -76,7 +115,8 @@ else:
             test_file = os.path.join(tmpdir, "test.c")
             with open(test_file, "w") as f:
                 f.write("#include <omp.h>\nint main(void) { return omp_get_num_threads(); }\n")
-            cc = os.environ.get("CC", "cc")
+            import sysconfig
+            cc = os.environ.get("CC") or sysconfig.get_config_var("CC") or "cc"
             cmd = [cc, "-fopenmp", test_file, "-o", os.path.join(tmpdir, "test")]
             res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if res.returncode == 0:
@@ -107,5 +147,12 @@ extensions = [
 ]
 
 setup(
+    name="nufi",
+    version="0.1.0",
+    packages=["nufi", "nufi.kernels"],
     ext_modules=cythonize(extensions, compiler_directives={"language_level": "3"}),
+    python_requires=">=3.8",
+    install_requires=[
+        "numpy>=1.20.0",
+    ],
 )

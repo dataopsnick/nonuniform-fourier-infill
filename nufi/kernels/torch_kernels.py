@@ -43,10 +43,21 @@ def compute_ND_NUDFT(X_list, device=None):
         N = len(data)
         # Estimate Nyquist frequency from median/min sampling interval
         if len(v_timestamps) > 1:
-            p_n = np.diff(v_timestamps)
-            min_p = np.nanmin(p_n) if len(p_n) > 0 and np.nanmin(p_n) > 0 else 1.0
-            nyquist_frequency = 0.5 / max(min_p, 1e-12)
+            # Sort to ensure positive diffs
+            sort_idx = np.argsort(v_timestamps)
+            sorted_ts = v_timestamps[sort_idx]
+            p_n = np.diff(sorted_ts)
+            p_n = p_n[p_n > 0]  # keep only positive intervals
+            if len(p_n) > 0:
+                min_p = np.min(p_n)
+                nyquist_frequency = 0.5 / max(min_p, 1e-12)
+            else:
+                import warnings
+                warnings.warn("Cannot estimate Nyquist frequency; all sampling intervals are zero or negative. Defaulting to 1.0.")
+                nyquist_frequency = 1.0
         else:
+            import warnings
+            warnings.warn("Only one valid sample; cannot estimate Nyquist frequency. Defaulting to 1.0.")
             nyquist_frequency = 1.0
 
         f_k = torch.linspace(0, nyquist_frequency, N, dtype=torch.float64, device=dev)
@@ -58,10 +69,10 @@ def compute_ND_NUDFT(X_list, device=None):
         # Guard against excessive memory for large N
         MAX_MEM_N = 10_000
         if N > MAX_MEM_N:
-            import warnings
-            warnings.warn(
-                f"N={N} is large; compute_ND_NUDFT may consume excessive memory. "
-                f"Consider using compute_Fast_ND_NUDFT."
+            raise MemoryError(
+                f"N={N} exceeds MAX_MEM_N={MAX_MEM_N}; compute_ND_NUDFT would allocate "
+                f"a ({len(v_timestamps)} × {N}) complex tensor. "
+                f"Use compute_Fast_ND_NUDFT or reduce N."
             )
 
         exponent = -2.0j * np.pi * t_timestamps.unsqueeze(1) * f_k.unsqueeze(0)
@@ -138,6 +149,7 @@ def covariance_compensation(X_list, device=None):
     covariance_matrix = df.cov().to_numpy()
 
     nan_mask = np.any(np.isnan(covariance_matrix), axis=0)
+    valid_idx = np.arange(covariance_matrix.shape[0])  # default: all valid
     if np.any(nan_mask):
         import warnings
         n_nan = nan_mask.sum()
@@ -147,9 +159,11 @@ def covariance_compensation(X_list, device=None):
         if len(valid_idx) == 0:
             raise ValueError("All columns are degenerate; cannot compute covariance compensation.")
         covariance_matrix = covariance_matrix[np.ix_(valid_idx, valid_idx)]
-    
+
     # Regularize to ensure positive-definiteness for LDL^T
-    eps = 1e-10
+    # Scale epsilon relative to the matrix magnitude for robustness
+    diag_mean = np.mean(np.diag(covariance_matrix))
+    eps = max(1e-10 * diag_mean, 1e-15) if diag_mean > 0 else 1e-10
     covariance_matrix = covariance_matrix + eps * np.eye(covariance_matrix.shape[0])
 
     # Step 4: Perform LDL^T decomposition
@@ -159,7 +173,7 @@ def covariance_compensation(X_list, device=None):
     except Exception:
         raise ValueError("LDL decomposition failed; covariance matrix may be singular.")
 
-    return lu, d, perm
+    return lu, d, perm, valid_idx
 
 def solve_cg(A, b, alpha, max_iter=100, tol=1e-5):
     """
@@ -217,6 +231,8 @@ def optimize_alpha_gcv(A, y, alphas=None, return_svd=False):
     """
     if alphas is None:
         alphas = [1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0, 100.0]
+    if len(alphas) == 0:
+        raise ValueError("alphas must contain at least one candidate value.")
     
     N, M = A.shape
     U, S, Vh = torch.linalg.svd(A, full_matrices=False)
@@ -245,6 +261,17 @@ def solve_tikhonov_nudft(timestamps, data, f_k, alpha, solver='direct', max_iter
         raise ValueError(f"Regularization parameter alpha must be positive, got {alpha}")
 
     dev = get_device(device)
+    
+    # Validate inputs
+    timestamps = np.asarray(timestamps, dtype=np.float64)
+    data = np.asarray(data, dtype=np.float64)
+    f_k = np.asarray(f_k, dtype=np.float64)
+    
+    valid_mask = ~np.isnan(timestamps) & ~np.isnan(data) & ~np.isnan(f_k)
+    valid_mask &= ~np.isinf(timestamps) & ~np.isinf(data) & ~np.isinf(f_k)
+    if not np.all(valid_mask):
+        raise ValueError("Input timestamps, data, or f_k contain NaN/Inf values.")
+
     t_timestamps = torch.tensor(timestamps, dtype=torch.float64, device=dev)
     t_data = torch.tensor(data, dtype=torch.float64, device=dev)
     t_f_k = torch.tensor(f_k, dtype=torch.float64, device=dev)
@@ -260,9 +287,11 @@ def solve_tikhonov_nudft(timestamps, data, f_k, alpha, solver='direct', max_iter
     if solver == 'cg':
         F = solve_cg(A, b, alpha, max_iter=max_iter, tol=tol)
     else:
-        # Direct solver: (A^H A + alpha * I) F = A^H y
+        # Direct solver via least-squares on augmented system [A; sqrt(alpha)*I] @ F = [y; 0]
+        # This avoids squaring the condition number of A.
         M = A.shape[1]
-        reg_matrix = A.adjoint() @ A + alpha * torch.eye(M, dtype=torch.complex128, device=dev)
-        F = torch.linalg.solve(reg_matrix, b)
+        A_aug = torch.vstack([A, torch.sqrt(torch.tensor(alpha, dtype=torch.float64, device=dev)) * torch.eye(M, dtype=torch.complex128, device=dev)])
+        b_aug = torch.cat([t_data.to(torch.complex128), torch.zeros(M, dtype=torch.complex128, device=dev)])
+        F = torch.linalg.lstsq(A_aug, b_aug.unsqueeze(1)).solution.squeeze(1)
         
     return F

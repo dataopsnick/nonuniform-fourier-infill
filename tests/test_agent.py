@@ -1,5 +1,7 @@
+import json
 import os
 import shutil
+import tempfile
 import unittest
 import numpy as np
 import pandas as pd
@@ -21,21 +23,14 @@ class TestAgentNativeLayer(unittest.TestCase):
             "signal": self.data_with_nan
         })
         
-        # Paths for testing
-        self.test_log = "test_nufi_transformations.log"
-        self.test_history = ".test_nufi_history"
-        
-        # Clean up existing files
-        self.clean_up()
+        # Paths for testing — use unique temp directories for isolation
+        self._tmpdir = tempfile.mkdtemp(prefix="nufi_test_")
+        self.test_log = os.path.join(self._tmpdir, "transformations.log")
+        self.test_history = os.path.join(self._tmpdir, "history")
 
     def tearDown(self):
-        self.clean_up()
-
-    def clean_up(self):
-        if os.path.exists(self.test_log):
-            os.remove(self.test_log)
-        if os.path.exists(self.test_history):
-            shutil.rmtree(self.test_history, ignore_errors=True)
+        if hasattr(self, "_tmpdir") and os.path.exists(self._tmpdir):
+            shutil.rmtree(self._tmpdir, ignore_errors=True)
 
     def test_impute_dataframe_zero_config(self):
         # Test zero-config impute_dataframe

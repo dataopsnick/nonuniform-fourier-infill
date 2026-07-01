@@ -40,7 +40,19 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False):
         
     # If a specific column is defined as time, set it as index
     if time_col is not None:
+        if time_col not in pd_df.columns:
+            raise ValueError(
+                f"time_col '{time_col}' not found in DataFrame columns: {list(pd_df.columns)}"
+            )
         if keep_time_col:
+            import warnings
+            warnings.warn(
+                "keep_time_col=True duplicates timestamps as both index and feature. "
+                "Timestamp magnitudes (e.g., Unix nanoseconds) may dominate covariance "
+                "estimation and produce biased imputations for other columns. "
+                "Consider normalizing timestamps or using keep_time_col=False.",
+                UserWarning
+            )
             time_values = pd_df[time_col].copy()
             col_pos = pd_df.columns.get_loc(time_col)
             pd_df = pd_df.set_index(time_col)
@@ -99,11 +111,23 @@ def infill_multiindex_dataframe(df, imputer=None, entity_level=0, time_level=1, 
     else:
         pd_df = df.copy()
         
+    # Validate MultiIndex levels
+    n_levels = pd_df.index.nlevels
+    if isinstance(entity_level, int) and entity_level >= n_levels:
+        raise ValueError(
+            f"entity_level={entity_level} exceeds MultiIndex nlevels={n_levels}"
+        )
+    if isinstance(time_level, int) and time_level >= n_levels:
+        raise ValueError(
+            f"time_level={time_level} exceeds MultiIndex nlevels={n_levels}"
+        )
+        
     if imputer is None:
         imputer = NufiImputer()
         
     # Group by the entity level and apply NufiImputer
-    grouped = pd_df.groupby(level=entity_level, group_keys=False)
+    # sort=False preserves original entity order; time ordering is handled separately
+    grouped = pd_df.groupby(level=entity_level, group_keys=False, sort=False)
     
     def imputer_apply(group):
         # We need to sort index by time level to ensure proper chronological order
@@ -132,7 +156,11 @@ def infill_multiindex_dataframe(df, imputer=None, entity_level=0, time_level=1, 
         infilled_temp.index = group_sorted.index
         return infilled_temp
         
-    infilled_pd = grouped.apply(imputer_apply)
+    # Avoid groupby.apply double-call on first group by iterating manually
+    infilled_dfs = []
+    for _, group in grouped:
+        infilled_dfs.append(imputer_apply(group))
+    infilled_pd = pd.concat(infilled_dfs)
     
     if is_cudf:
         return cudf.DataFrame.from_pandas(infilled_pd)

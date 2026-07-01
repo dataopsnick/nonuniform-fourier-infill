@@ -50,7 +50,8 @@ def generate_benchmark_data(n_samples: int = 200, n_channels: int = 3, missing_r
         col = masked_data[:, c]
         valid_idx = np.where(~np.isnan(col))[0]
         if len(valid_idx) == 0:
-            continue  # can't fill, leave as NaN
+            raise ValueError(f"Channel {c} has no valid observations — cannot benchmark with entirely NaN channel. "
+                             f"Consider increasing n_samples or reducing missing_rate.")
         if np.isnan(col[0]):
             col[0] = col[valid_idx[0]]
         if np.isnan(col[-1]):
@@ -85,8 +86,11 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
             "Covariance Error (Frobenius)": float(nufi_cov_err),
             "Runtime (s)": float(nufi_time)
         }
-    except (ValueError, RuntimeError, ImportError) as e:
-        results["NUFI"] = {"Error": str(e)}
+    except Exception as e:
+        import traceback
+        print(f"[WARN] NUFI benchmark failed: {e}")
+        traceback.print_exc()
+        results["NUFI"] = {"Error": f"{type(e).__name__}: {e}"}
 
     # ==========================================
     # 2. Cubic Spline Interpolation
@@ -95,6 +99,9 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
     try:
         spline_infilled = df_masked.interpolate(method='cubic', axis=0)
         # Fill any remaining NaNs with linear fallback and backward/forward fill
+        remaining_nan = spline_infilled.isna().sum().sum()
+        if remaining_nan > 0:
+            print(f"[INFO] Cubic spline left {remaining_nan} NaN(s); falling back to linear → ffill → bfill")
         spline_infilled = spline_infilled.interpolate(method='linear', axis=0).ffill().bfill()
         spline_time = time.time() - start
         
@@ -148,7 +155,12 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
                 col_data = df_masked.to_numpy()[:, c]
                 valid = ~np.isnan(col_data)
                 
-                gp = GaussianProcessRegressor(kernel=RBF(length_scale=1.0), alpha=0.1, random_state=42)
+                gp = GaussianProcessRegressor(
+                    kernel=RBF(length_scale=np.ptp(timestamps) / np.sqrt(len(timestamps))),
+                    alpha=0.1,
+                    random_state=42,
+                    n_restarts_optimizer=3
+                )
                 gp.fit(timestamps[valid].reshape(-1, 1), col_data[valid])
                 gp_infilled_data[:, c] = gp.predict(timestamps.reshape(-1, 1))
                 
@@ -190,5 +202,9 @@ if __name__ == "__main__":
     print_benchmark_results(benchmark_results)
     
     # Save results to disk
-    with open("benchmark_results.json", "w") as f:
-        json.dump(benchmark_results, f, indent=4)
+    try:
+        with open("benchmark_results.json", "w") as f:
+            json.dump(benchmark_results, f, indent=4)
+            print("Results saved to benchmark_results.json")
+    except IOError as e:
+        print(f"[WARN] Could not save results to disk: {e}")
