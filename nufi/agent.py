@@ -26,8 +26,11 @@ class TransformationTracker:
         resolved_log = os.path.realpath(log_path)
         resolved_hist = os.path.realpath(history_dir)
         for path, resolved in ((log_path, resolved_log), (history_dir, resolved_hist)):
-            if os.path.commonpath([safe_root, resolved]) != safe_root:
-                raise ValueError(f"Path {path} is outside the allowed directory.")
+            try:
+                if os.path.commonpath([safe_root, resolved]) != safe_root:
+                    raise ValueError(f"Path {path} is outside the allowed directory.")
+            except ValueError:
+                raise ValueError(f"Path {path} is outside the allowed directory (possibly on a different drive).")
         self.log_path = resolved_log
         self.history_dir = resolved_hist
         self._lock = threading.RLock()
@@ -212,7 +215,10 @@ def impute_dataframe(
             numeric_idx = pd.to_numeric(df_copy.index, errors='coerce')
             if numeric_idx.isna().any():
                 raise ValueError("Index contains non-convertible values")
-            df_copy.index = numeric_idx.astype(np.float64)
+            if np.can_cast(numeric_idx, np.int64, casting='safe'):
+                df_copy.index = numeric_idx.astype(np.int64)
+            else:
+                df_copy.index = numeric_idx.astype(np.float64)
         except Exception:
             raise TypeError(
                 f"DataFrame index must be numeric (timestamps). "
@@ -408,19 +414,23 @@ def plot_diagnostics(
         orig_copy = orig_copy.set_index(time_col)
         inf_copy = inf_copy.set_index(time_col)
 
-    if not pd.api.types.is_numeric_dtype(orig_copy.index):
-        try:
-            # Attempt conversion for datetime-like or string timestamps
-            numeric_idx = pd.to_numeric(orig_copy.index, errors='coerce')
-            if numeric_idx.isna().any():
-                raise ValueError("Index contains non-convertible values")
-            orig_copy.index = numeric_idx.astype(np.float64)
-        except Exception:
-            raise TypeError(
-                f"DataFrame index must be numeric (timestamps). "
-                f"Got dtype={orig_copy.index.dtype}. Provide a numeric time column via `time_col` "
-                f"or ensure your index contains numeric values."
-            )
+    for df_copy in (orig_copy, inf_copy):
+        if not pd.api.types.is_numeric_dtype(df_copy.index):
+            try:
+                # Attempt conversion for datetime-like or string timestamps
+                numeric_idx = pd.to_numeric(df_copy.index, errors='coerce')
+                if numeric_idx.isna().any():
+                    raise ValueError("Index contains non-convertible values")
+                if np.can_cast(numeric_idx, np.int64, casting='safe'):
+                    df_copy.index = numeric_idx.astype(np.int64)
+                else:
+                    df_copy.index = numeric_idx.astype(np.float64)
+            except Exception:
+                raise TypeError(
+                    f"DataFrame index must be numeric (timestamps). "
+                    f"Got dtype={df_copy.index.dtype}. Provide a numeric time column via `time_col` "
+                    f"or ensure your index contains numeric values."
+                )
 
     timestamps = orig_copy.index.to_numpy(dtype=np.float64)
 
