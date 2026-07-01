@@ -110,7 +110,7 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                     score = compute_gcv_from_svd(S, y_tilde, y_norm_sq, opt_alpha, N_val)
                 except RuntimeError as e:
                     import warnings
-                    warnings.warn(f"SVD failed for column {col_idx}, n_f={n_f}: {e}. Skipping candidate.")
+                    warnings.warn(f"Candidate evaluation failed for column {col_idx}, n_f={n_f}: {e}. Skipping candidate.")
                     continue
                 
                 if score < best_gcv:
@@ -151,6 +151,8 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                 self.d_ = np.eye(n_cols)
                 inv_perm = np.argsort(perm_small)
                 self.perm_ = np.arange(n_cols)
+                for i, c_i in enumerate(valid_cols):
+                    self.perm_[c_i] = valid_cols[perm_small[i]]
                 
                 # Map small matrices back to full size using perm_small mapping
                 if d_small.ndim == 1:
@@ -215,10 +217,16 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             f_k = np.linspace(0, nyquist_frequency, n_f)
             
             # Solve regularized system for continuous NUDFT spectrum F
-            F = solve_tikhonov_nudft(
-                v_timestamps, v_data, f_k, alpha, 
-                solver=self.solver, max_iter=self.max_iter, tol=self.tol, device=self.device
-            )
+            try:
+                F = solve_tikhonov_nudft(
+                    v_timestamps, v_data, f_k, alpha, 
+                    solver=self.solver, max_iter=self.max_iter, tol=self.tol, device=self.device
+                )
+            except RuntimeError as e:
+                raise RuntimeError(
+                    f"NUDFT solver failed for column {col_idx} with alpha={alpha}, n_f={n_f}: {e}. "
+                    f"Consider using a larger alpha or more observations."
+                )
             
             # Reconstruct the signal at all timestamps
             t_f_k = torch.tensor(f_k, dtype=torch.float64, device=dev)

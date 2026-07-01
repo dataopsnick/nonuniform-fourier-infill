@@ -3,6 +3,7 @@ import time
 import json
 import uuid
 import threading
+import re
 import torch
 import numpy as np
 import pandas as pd
@@ -28,7 +29,7 @@ class TransformationTracker:
             raise ValueError(f"log_path must be within current working directory: {log_path}")
         if not self.history_dir.startswith(cwd + os.sep) and self.history_dir != cwd:
             raise ValueError(f"history_dir must be within current working directory: {history_dir}")
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         
         with self._lock:
             try:
@@ -57,16 +58,16 @@ class TransformationTracker:
             except Exception as e:
                 raise TransformationLoggingError(f"Failed to save data snapshot {filepath}: {e}")
             
-        log_entry = {
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "event": "snapshot_saved",
-            "version_id": version_id,
-            "step_name": step_name,
-            "columns": list(df.columns),
-            "shape": df.shape,
-            "filepath": filepath
-        }
-        self.log_transformation(log_entry)
+            log_entry = {
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "event": "snapshot_saved",
+                "version_id": version_id,
+                "step_name": step_name,
+                "columns": list(df.columns),
+                "shape": df.shape,
+                "filepath": filepath
+            }
+            self.log_transformation(log_entry)
         return version_id
 
     def list_versions(self) -> list:
@@ -81,7 +82,8 @@ class TransformationTracker:
                 for f in files:
                     parts = f.split("_")
                     # Detect new format: ver_{ts}_{uuid8}_{step_name}.csv
-                    if len(parts) >= 4 and len(parts[2]) == 8 and all(c in '0123456789abcdef' for c in parts[2]):
+                    # Old format: ver_{timestamp}_{step_name}.csv
+                    if len(parts) >= 4 and re.match(r'^[0-9a-f]{8}$', parts[2]):
                         version_id = f"{parts[0]}_{parts[1]}_{parts[2]}"
                         step_name = "_".join(parts[3:]).replace(".csv", "")
                     elif len(parts) >= 3:
@@ -115,14 +117,14 @@ class TransformationTracker:
             with self._lock:
                 df = pd.read_csv(target["filepath"], index_col=0)
             
-            # Log the reversion
-            log_entry = {
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-                "event": "reverted_to_version",
-                "version_id": version_id,
-                "step_name": target["step_name"]
-            }
-            self.log_transformation(log_entry)
+                # Log the reversion
+                log_entry = {
+                    "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                    "event": "reverted_to_version",
+                    "version_id": version_id,
+                    "step_name": target["step_name"]
+                }
+                self.log_transformation(log_entry)
             return df
         except Exception as e:
             raise TransformationLoggingError(f"Failed to load or log reverted version {version_id}: {e}")

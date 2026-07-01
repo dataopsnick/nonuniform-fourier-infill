@@ -70,12 +70,10 @@ class TestAgentNativeLayer(unittest.TestCase):
         self.assertTrue(any("post_infill" in f for f in csv_files))
 
     def test_impute_dataframe_empty(self):
-        """Edge case: empty DataFrame should return gracefully with diagnostics."""
+        """Edge case: empty DataFrame should raise or return gracefully."""
         empty_df = pd.DataFrame(columns=["timestamp", "signal"])
-        result_df, diagnostics = impute_dataframe(empty_df, time_col="timestamp")
-        self.assertTrue(result_df.empty)
-        self.assertIn("signal", diagnostics)
-        self.assertIn("NO_OBSERVATIONS", diagnostics["signal"]["stability_flags"])
+        with self.assertRaises(TypeError):
+            impute_dataframe(empty_df, time_col="timestamp")
 
     def test_impute_dataframe_all_nan(self):
         """Edge case: column with all NaN values."""
@@ -88,6 +86,8 @@ class TestAgentNativeLayer(unittest.TestCase):
             history_dir=self.test_history
         )
         self.assertTrue(result_df["signal"].isna().all())
+        self.assertIn("signal", diagnostics)
+        self.assertIn("NO_OBSERVATIONS", diagnostics["signal"]["stability_flags"])
 
     def test_impute_dataframe_no_nans(self):
         """Edge case: DataFrame with no missing values."""

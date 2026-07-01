@@ -54,6 +54,16 @@ def compute_ND_NUDFT(X_list, device=None):
         # Standard NUDFT: A[n,k] = exp(-2πi * t_n * f_k), then sum over n
         t_timestamps = torch.tensor(v_timestamps, dtype=torch.float64, device=dev)
         t_data_all = torch.tensor(v_data, dtype=torch.float64, device=dev)
+
+        # Guard against excessive memory for large N
+        MAX_MEM_N = 10_000
+        if N > MAX_MEM_N:
+            import warnings
+            warnings.warn(
+                f"N={N} is large; compute_ND_NUDFT may consume excessive memory. "
+                f"Consider using compute_Fast_ND_NUDFT."
+            )
+
         exponent = -2.0j * np.pi * t_timestamps.unsqueeze(1) * f_k.unsqueeze(0)
         summation = torch.sum(t_data_all.to(torch.complex128).unsqueeze(1) * torch.exp(exponent), dim=0)
         
@@ -87,7 +97,11 @@ def compute_Fast_ND_NUDFT(X_list, device=None):
         # Generate uniform grid using min/max of valid timestamps
         t_min, t_max = np.min(v_timestamps), np.max(v_timestamps)
         uniform_grid = np.linspace(t_min, t_max, N)
-        # Interpolate onto uniform grid
+        # Ensure timestamps are sorted for np.interp (requires monotonic increasing)
+        if not np.all(np.diff(v_timestamps) >= 0):
+            sort_idx = np.argsort(v_timestamps)
+            v_timestamps = v_timestamps[sort_idx]
+            v_data = v_data[sort_idx]
         uniform_data = np.interp(uniform_grid, v_timestamps, v_data)
 
         # Compute FFT using PyTorch
@@ -123,15 +137,27 @@ def covariance_compensation(X_list, device=None):
     df = pd.DataFrame(flat_data)
     covariance_matrix = df.cov().to_numpy()
 
-    if np.any(np.isnan(covariance_matrix)):
+    nan_mask = np.any(np.isnan(covariance_matrix), axis=0)
+    if np.any(nan_mask):
         import warnings
-        warnings.warn("Covariance matrix contains NaN entries; degenerate columns detected.")
+        n_nan = nan_mask.sum()
+        warnings.warn(f"Covariance matrix contains NaN entries in {n_nan} columns; degenerate columns detected. Applying regularization.")
+        # Drop degenerate rows/columns instead of zero-filling
+        valid_idx = np.where(~nan_mask)[0]
+        if len(valid_idx) == 0:
+            raise ValueError("All columns are degenerate; cannot compute covariance compensation.")
+        covariance_matrix = covariance_matrix[np.ix_(valid_idx, valid_idx)]
     
-    covariance_matrix = np.nan_to_num(covariance_matrix, nan=0.0)
+    # Regularize to ensure positive-definiteness for LDL^T
+    eps = 1e-10
+    covariance_matrix = covariance_matrix + eps * np.eye(covariance_matrix.shape[0])
 
     # Step 4: Perform LDL^T decomposition
     # LDL^T factorizes A = P * L * D * L^T
-    lu, d, perm = scipy.linalg.ldl(covariance_matrix)
+    try:
+        lu, d, perm = scipy.linalg.ldl(covariance_matrix)
+    except Exception:
+        raise ValueError("LDL decomposition failed; covariance matrix may be singular.")
 
     return lu, d, perm
 

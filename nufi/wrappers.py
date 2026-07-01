@@ -43,6 +43,7 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False):
         if keep_time_col:
             time_values = pd_df[time_col].copy()
             pd_df = pd_df.set_index(time_col)
+            pd_df.index.name = None  # avoid name collision with the column
             pd_df[time_col] = time_values
             # Note: the time column is now both the index and a feature column.
             # The imputer will fit/transform it like any other column, which may

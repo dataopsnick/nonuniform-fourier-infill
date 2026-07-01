@@ -31,7 +31,7 @@ def test_derivative_continuity():
     
     # Fourier must be smoother (have smaller or equal max derivative spikes) than linear
     assert np.max(np.abs(dx)) <= np.max(np.abs(lin_dx)) * 1.01
-    assert np.max(np.abs(ddx)) < np.max(np.abs(lin_ddx))
+    assert np.max(np.abs(ddx)) < np.max(np.abs(lin_ddx)) * 0.99
 
 def test_covariance_preservation():
     # Verify that multi-signal covariance is maintained after imputation

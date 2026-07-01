@@ -31,7 +31,7 @@ ext_compiler_args = []
 ext_linker_args = []
 ext_include_dirs = [np.get_include()]
 
-if os.environ.get("NUFI_NO_OPENMP"):
+if "NUIFI_NO_OPENMP" in os.environ:
     ext_compiler_args = []
     ext_linker_args = []
 else:
@@ -41,11 +41,14 @@ else:
         # On macOS, standard clang doesn't support -fopenmp without extra config.
         # Try to detect Homebrew libomp; fall back to no OpenMP with a warning.
         libomp_candidates = [
-            os.environ.get("LIBOMP_PATH", ""),
             "/opt/homebrew/opt/libomp",   # Apple Silicon Homebrew
             "/usr/local/opt/libomp",       # Intel Homebrew
             "/opt/local/lib/libomp",       # MacPorts
         ]
+        # Also allow explicit override via environment variable
+        env_libomp = os.environ.get("LIBOMP_PATH")
+        if env_libomp:
+            libomp_candidates.insert(0, env_libomp)
         libomp_path = None
         for candidate in libomp_candidates:
             if candidate and os.path.isdir(candidate):
@@ -56,7 +59,8 @@ else:
             ext_linker_args = ["-L" + os.path.join(libomp_path, "lib"), "-lomp"]
             ext_include_dirs.append(os.path.join(libomp_path, "include"))
         else:
-            print("WARNING: OpenMP not found. Install libomp via 'brew install libomp' for better performance, or set NUFI_NO_OPENMP=1 to suppress this warning.")
+            import warnings
+            warnings.warn("OpenMP not found. Install libomp via 'brew install libomp' for better performance.")
             ext_compiler_args = []
             ext_linker_args = []
     else:
@@ -85,7 +89,8 @@ else:
             ext_compiler_args = ["-fopenmp"]
             ext_linker_args = ["-fopenmp"]
         else:
-            print("WARNING: OpenMP not supported by compiler, disabling.")
+            import warnings
+            warnings.warn("OpenMP not supported by compiler, disabling.")
             ext_compiler_args = []
             ext_linker_args = []
 
