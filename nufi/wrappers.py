@@ -42,9 +42,10 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False):
     if time_col is not None:
         if keep_time_col:
             time_values = pd_df[time_col].copy()
+            col_pos = pd_df.columns.get_loc(time_col)
             pd_df = pd_df.set_index(time_col)
             pd_df.index.name = None  # avoid name collision with the column
-            pd_df[time_col] = time_values
+            pd_df.insert(col_pos, time_col, time_values)
             # Note: the time column is now both the index and a feature column.
             # The imputer will fit/transform it like any other column, which may
             # distort covariance estimation if timestamp values differ in scale.

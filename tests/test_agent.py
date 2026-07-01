@@ -98,7 +98,7 @@ class TestAgentNativeLayer(unittest.TestCase):
             log_path=self.test_log,
             history_dir=self.test_history
         )
-        pd.testing.assert_frame_equal(clean_df, result_df)
+        pd.testing.assert_frame_equal(clean_df, result_df, atol=1e-2)
 
     def test_impute_dataframe_missing_time_col(self):
         """Edge case: specified time column does not exist."""

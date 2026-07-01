@@ -3,300 +3,221 @@
 [ocr] Filtered 1 file(s) by include/exclude rules
 [ocr] Skipping plan phase for pyproject.toml (12 lines < threshold 50)
 [ocr] Skipping plan phase for tests/benchmark.py (29 lines < threshold 50)
-[ocr]   ▶ file_read file_path=pyproject.toml
-[ocr]   ✔ file_read (5ms)
 [ocr]   ▶ file_read_diff
+[ocr]   ✔ file_read_diff (0s)
+[ocr]   ▶ file_read_diff path_array=[pyproject.toml setup.py]
 [ocr]   ✔ file_read_diff (0s)
 [ocr]   ▶ code_comment "pyproject.toml"
 [ocr]   ✔ code_comment (0s)
-[ocr]   ▶ file_read end_line=50 file_path=pyproject.toml start_line=1
-[ocr]   ✔ file_read (2ms)
-[ocr]   ▶ file_read file_path=setup.py start_line=1 end_line=50
-[ocr]   ✔ file_read (2ms)
 [ocr] Skipping plan phase for tests/test_covariance.py (22 lines < threshold 50)
-[ocr]   ▶ code_comment "tests/benchmark.py"
-[ocr]   ✔ code_comment (0s)
-[ocr]   ▶ file_read end_line=60 file_path=tests/test_covariance.py start_line=1
+[ocr] Plan completed for setup.py
+[ocr]   ▶ file_read file_path=tests/test_covariance.py
 [ocr]   ✔ file_read (3ms)
 [ocr]   ▶ file_read file_path=pyproject.toml
 [ocr]   ✔ file_read (2ms)
-[ocr]   ▶ file_read file_path=setup.py
-[ocr]   ✔ file_read (2ms)
 [ocr] Plan completed for nufi/agent.py
-[ocr] Plan completed for tests/test_agent.py
-[ocr] Plan completed for setup.py
-[ocr]   ▶ code_search file_patterns=[nufi/agent.py] search_text=def impute_dataframe
-[ocr]   ✔ code_search (3ms)
-[ocr]   ▶ code_search file_patterns=[nufi/agent.py] search_text=def plot_diagnostics
-[ocr]   ✔ code_search (3ms)
-[ocr]   ▶ code_search search_text=json file_patterns=[tests/test_agent.py]
-[ocr]   ✔ code_search (4ms)
-[ocr] Plan completed for nufi/wrappers.py
 [ocr]   ▶ file_read file_path=nufi/agent.py
-[ocr]   ✔ file_read (6ms)
-[ocr]   ▶ code_search case_sensitive=true file_patterns=[*.py *.md *.rst *.cfg *.toml] search_text=NUIFI_NO_OPENMP
-[ocr]   ✔ code_search (2ms)
-[ocr]   ▶ code_search file_patterns=[*.py] search_text=warnings
-[ocr]   ✔ code_search (1ms)
-[ocr]   ▶ file_read_diff path_array=[pyproject.toml]
-[ocr]   ✔ file_read_diff (0s)
-[ocr]   ▶ code_search search_text=infill_dataframe file_patterns=[*.py]
-[ocr]   ✔ code_search (2ms)
-[ocr]   ▶ code_search search_text=infill_multiindex_dataframe file_patterns=[*.py]
-[ocr]   ✔ code_search (1ms)
-[ocr]   ▶ file_read_diff
-[ocr]   ✔ file_read_diff (0s)
-[ocr]   ▶ code_search case_sensitive=false search_text=NUIFI_NO_OPENMP
-[ocr]   ✔ code_search (2ms)
-[ocr]   ▶ code_search case_sensitive=false search_text=libomp
-[ocr]   ✔ code_search (2ms)
-[ocr]   ▶ file_read end_line=120 file_path=setup.py start_line=1
-[ocr]   ✔ file_read (2ms)
-[ocr]   ▶ code_search search_text=torch\. file_patterns=[nufi/agent.py] case_sensitive=true
-[ocr]   ✔ code_search (3ms)
+[ocr]   ✔ file_read (3ms)
 [ocr]   ▶ file_read_diff path_array=[tests/test_agent.py]
 [ocr]   ✔ file_read_diff (0s)
-[ocr]   ▶ code_search search_text=list_versions\(\)|revert_to_version\( file_patterns=[*.py] case_sensitive=false
+[ocr]   ▶ file_read file_path=setup.py
+[ocr]   ✔ file_read (2ms)
+[ocr] Plan completed for nufi/wrappers.py
+[ocr]   ▶ file_read_diff path_array=[nufi/impute.py]
+[ocr]   ✔ file_read_diff (0s)
+[ocr]   ▶ code_search file_patterns=[*.py] search_text=infill_dataframe\(.*time_col use_perl_regexp=true case_sensitive=false
 [ocr]   ✔ code_search (2ms)
-[ocr]   ▶ code_search search_text=TransformationTracker\( file_patterns=[*.py] case_sensitive=true
+[ocr]   ▶ code_search file_patterns=[tests/] search_text=infill.*imputer.*must preserve row count use_perl_regexp=false case_sensitive=false
 [ocr]   ✔ code_search (2ms)
-[ocr]   ▶ file_read file_path=nufi/agent.py start_line=1 end_line=415
-[ocr]   ✔ file_read (3ms)
+[ocr]   ▶ code_search search_text=infill_dataframe\(.*keep_time_col file_patterns=[*.py] case_sensitive=false
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ code_search search_text=must preserve row count file_patterns=[tests/ *.py] case_sensitive=false
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ file_read_diff path_array=[tests/test_agent.py tests/test_imputer.py]
+[ocr]   ✔ file_read_diff (0s)
+[ocr]   ▶ file_read file_path=nufi/wrappers.py
+[ocr]   ✔ file_read (2ms)
+[ocr] Plan completed for tests/test_agent.py
+[ocr]   ▶ code_search search_text=TransformationTracker\( file_patterns=[*.py]
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ code_search file_patterns=[tests/*.py] search_text=list_versions|revert_to_version
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ code_search search_text=def impute_dataframe file_patterns=[nufi/impute.py nufi/agent.py]
+[ocr]   ✔ code_search (3ms)
+[ocr]   ▶ code_search search_text=json\. file_patterns=[tests/test_agent.py]
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ code_search search_text=pre_infill|post_infill file_patterns=[nufi/impute.py nufi/agent.py]
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ code_search search_text=TransformationTracker file_patterns=[*.py]
+[ocr]   ✔ code_search (5ms)
 [ocr]   ▶ code_search search_text=list_versions file_patterns=[*.py]
 [ocr]   ✔ code_search (2ms)
-[ocr]   ▶ code_search search_text=revert_to_version file_patterns=[*.py]
-[ocr]   ✔ code_search (8ms)
-[ocr]   ▶ code_comment "tests/test_covariance.py"
-[ocr]   ✔ code_comment (0s)
-[ocr]   ▶ file_read file_path=tests/test_agent.py
+[ocr]   ▶ file_read file_path=nufi/impute.py start_line=1 end_line=50
+[ocr]   ✔ file_read (3ms)
+[ocr]   ▶ file_read file_path=tests/test_agent.py start_line=1 end_line=30
+[ocr]   ✔ file_read (2ms)
+[ocr]   ▶ file_read file_path=tests/test_agent.py end_line=179 start_line=1
+[ocr]   ✔ file_read (4ms)
+[ocr]   ▶ file_find query_name=agent.py case_sensitive=true
+[ocr]   ✔ file_find (5ms)
+[ocr]   ▶ file_read file_path=setup.py start_line=60 end_line=82
+[ocr]   ✔ file_read (3ms)
+[ocr]   ▶ file_read file_path=nufi/agent.py start_line=1 end_line=150
+[ocr]   ✔ file_read (2ms)
+[ocr]   ▶ file_read end_line=300 file_path=nufi/agent.py start_line=150
+[ocr]   ✔ file_read (2ms)
+[ocr]   ▶ file_read end_line=360 file_path=nufi/agent.py start_line=300
 [ocr]   ✔ file_read (2ms)
 [ocr] Plan completed for nufi/kernels/torch_kernels.py
-[ocr] Plan completed for nufi/impute.py
-[ocr]   ▶ code_comment "setup.py"
-[ocr]   ✔ code_comment (0s)
-[ocr]   ▶ file_read_diff path_array=[nufi/kernels/torch_kernels.py]
-[ocr]   ✔ file_read_diff (0s)
-[ocr]   ▶ code_search search_text=self\.(alphas_|n_frequencies_) file_patterns=[nufi/impute.py] case_sensitive=true
-[ocr]   ✔ code_search (2ms)
-[ocr]   ▶ code_search case_sensitive=true search_text=\.perm_ file_patterns=[*.py]
-[ocr]   ✔ code_search (2ms)
-[ocr]   ▶ code_search file_patterns=[*.py] search_text=covariance_compensation
-[ocr]   ✔ code_search (2ms)
-[ocr]   ▶ code_search file_patterns=[*.py] search_text=compute_ND_NUDFT
-[ocr]   ✔ code_search (2ms)
-[ocr]   ▶ code_search file_patterns=[*.py] search_text=optimize_alpha_gcv
-[ocr]   ✔ code_search (2ms)
-[ocr]   ▶ code_search case_sensitive=false file_patterns=[*.py] search_text=sort.*timestamp|timestamp.*sort
-[ocr]   ✔ code_search (2ms)
-[ocr]   ▶ code_search search_text=infill_dataframe|infill_multiindex_dataframe file_patterns=[*.py]
-[ocr]   ✔ code_search (2ms)
-[ocr]   ▶ file_read file_path=nufi/impute.py start_line=200 end_line=260
-[ocr]   ✔ file_read (3ms)
-[ocr]   ▶ file_read file_path=nufi/impute.py start_line=80 end_line=160
-[ocr]   ✔ file_read (2ms)
-[ocr]   ▶ code_search search_text=alphas_|n_frequencies_ file_patterns=[nufi/impute.py] case_sensitive=false
-[ocr]   ✔ code_search (1ms)
+[ocr] Plan completed for tests/test_imputer.py
 [ocr]   ▶ file_read_diff
 [ocr]   ✔ file_read_diff (0s)
-[ocr]   ▶ file_read file_path=nufi/kernels/torch_kernels.py start_line=1 end_line=50
-[ocr]   ✔ file_read (3ms)
-[ocr]   ▶ file_read end_line=130 file_path=nufi/wrappers.py start_line=1
-[ocr]   ✔ file_read (2ms)
-[ocr]   ▶ file_read end_line=243 file_path=nufi/kernels/torch_kernels.py start_line=50
-[ocr]   ▶ file_read end_line=200 file_path=nufi/impute.py start_line=160
-[ocr]   ✔ file_read (3ms)
-[ocr]   ✔ file_read (3ms)
-[ocr] Plan completed for tests/test_imputer.py
-[ocr]   ▶ file_read end_line=80 file_path=nufi/impute.py start_line=45
-[ocr]   ✔ file_read (2ms)
-[ocr]   ▶ file_read_diff path_array=[nufi/impute.py nufi/kernels/torch_kernels.py]
+[ocr]   ▶ file_read_diff path_array=[nufi/impute.py nufi/agent.py nufi/wrappers.py]
 [ocr]   ✔ file_read_diff (0s)
-[ocr]   ▶ file_read file_path=nufi/impute.py start_line=28 end_line=90
+[ocr]   ▶ code_search search_text=covariance_compensation file_patterns=[*.py]
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ code_search search_text=compute_ND_NUDFT file_patterns=[*.py]
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ code_search search_text=solve_tikhonov_nudft file_patterns=[*.py]
+[ocr]   ✔ code_search (1ms)
+[ocr]   ▶ code_search file_patterns=[nufi/impute.py] search_text=def fit_transform|def fit|\.values case_sensitive=false
+[ocr]   ✔ code_search (3ms)
+[ocr]   ▶ code_search file_patterns=[tests/] search_text=infill_dataframe.*keep_time_col|keep_time_col case_sensitive=false
+[ocr]   ✔ code_search (4ms)
+[ocr]   ▶ file_read file_path=nufi/impute.py start_line=145 end_line=250
+[ocr]   ✔ file_read (5ms)
+[ocr] Plan completed for nufi/impute.py
+[ocr]   ▶ code_search search_text=covariance_compensation file_patterns=[nufi/]
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ code_search search_text=compute_ND_NUDFT file_patterns=[nufi/]
+[ocr]   ✔ code_search (1ms)
+[ocr]   ▶ code_search file_patterns=[nufi/] search_text=solve_tikhonov_nudft
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ code_search search_text=nyquist_frequency\|min_p file_patterns=[nufi/] use_perl_regexp=true
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ file_read file_path=nufi/kernels/torch_kernels.py
 [ocr]   ✔ file_read (2ms)
-[ocr]   ▶ file_read end_line=270 file_path=nufi/agent.py start_line=255
+[ocr]   ▶ file_read file_path=nufi/impute.py
 [ocr]   ✔ file_read (2ms)
-[ocr]   ▶ code_comment "nufi/wrappers.py"
-[ocr]   ✔ code_comment (0s)
-[ocr]   ▶ file_read_diff path_array=[nufi/wrappers.py nufi/agent.py]
+[ocr]   ▶ file_read_diff path_array=[nufi/kernels/torch_kernels.py]
 [ocr]   ✔ file_read_diff (0s)
-[ocr]   ▶ code_search case_sensitive=false file_patterns=[*.py] search_text=\.perm_
-[ocr]   ✔ code_search (2ms)
-[ocr]   ▶ file_read end_line=140 file_path=tests/test_agent.py start_line=67
-[ocr]   ✔ file_read (3ms)
-[ocr]   ▶ code_search search_text=def fit file_patterns=[nufi/impute.py]
-[ocr]   ✔ code_search (2ms)
-[ocr]   ▶ file_read end_line=179 file_path=tests/test_agent.py start_line=135
-[ocr]   ✔ file_read (2ms)
-[ocr]   ▶ code_comment "nufi/wrappers.py"
-[ocr]   ✔ code_comment (0s)
-[ocr]   ▶ file_read file_path=nufi/impute.py start_line=1 end_line=50
-[ocr]   ✔ file_read (2ms)
-[ocr]   ▶ file_read end_line=100 file_path=nufi/impute.py start_line=50
-[ocr]   ✔ file_read (2ms)
-[ocr]   ▶ file_read end_line=254 file_path=nufi/impute.py start_line=140
-[ocr]   ✔ file_read (2ms)
-[ocr]   ▶ file_read file_path=nufi/agent.py start_line=186 end_line=200
-[ocr]   ✔ file_read (2ms)
-[ocr]   ▶ code_comment "nufi/agent.py"
-[ocr]   ✔ code_comment (0s)
-[ocr]   ▶ code_search file_patterns=[tests/*.py] search_text=perm_ case_sensitive=false
-[ocr]   ✔ code_search (2ms)
-[ocr]   ▶ code_search case_sensitive=false file_patterns=[nufi/*.py] search_text=\.perm_
-[ocr]   ✔ code_search (2ms)
-[ocr]   ▶ code_comment "nufi/agent.py"
-[ocr]   ✔ code_comment (0s)
-[ocr]   ▶ file_find case_sensitive=false query_name=test_imputer.py
-[ocr]   ✔ file_find (2ms)
-[ocr] Review filter removed 1 comment(s) for nufi/wrappers.py
-[ocr]   ▶ code_comment "tests/test_agent.py"
-[ocr]   ✔ code_comment (2ms)
-[ocr]   ▶ file_read file_path=nufi/impute.py end_line=44 start_line=1
-[ocr]   ✔ file_read (2ms)
 [ocr]   ▶ file_read_diff path_array=[nufi/wrappers.py]
 [ocr]   ✔ file_read_diff (0s)
-[ocr]   ▶ file_read end_line=145 file_path=nufi/impute.py start_line=90
-[ocr]   ✔ file_read (2ms)
-[ocr]   ▶ code_comment "nufi/impute.py"
-[ocr]   ✔ code_comment (0s)
-[ocr]   ▶ code_search case_sensitive=false file_patterns=[*.py] search_text=compute_Fast_ND_NUDFT
+[ocr]   ▶ code_search search_text=self.alphas_ file_patterns=[*.py] case_sensitive=true
 [ocr]   ✔ code_search (2ms)
-[ocr]   ▶ code_comment "nufi/impute.py"
-[ocr]   ✔ code_comment (0s)
-[ocr]   ▶ code_comment "nufi/impute.py"
-[ocr]   ✔ code_comment (0s)
-[ocr]   ▶ code_search file_patterns=[tests/test_imputer.py] search_text=test_stochastic_imputation
+[ocr]   ▶ code_search file_patterns=[*.py] case_sensitive=true search_text=self.perm_
+[ocr]   ✔ code_search (1ms)
+[ocr]   ▶ code_search search_text=check_random_state file_patterns=[*.py] case_sensitive=true
+[ocr]   ✔ code_search (1ms)
+[ocr]   ▶ code_search search_text=sys file_patterns=[setup.py]
 [ocr]   ✔ code_search (2ms)
-[ocr]   ▶ file_read file_path=tests/test_imputer.py start_line=130 end_line=162
+[ocr]   ▶ file_read file_path=nufi/impute.py start_line=1 end_line=250
 [ocr]   ✔ file_read (2ms)
-[ocr]   ▶ code_comment "nufi/kernels/torch_kernels.py"
+[ocr]   ▶ file_read end_line=100 file_path=nufi/impute.py start_line=37
+[ocr]   ✔ file_read (5ms)
+[ocr]   ▶ file_read_diff path_array=[nufi/agent.py]
+[ocr]   ✔ file_read_diff (0s)
+[ocr]   ▶ file_read end_line=80 file_path=nufi/impute.py start_line=30
+[ocr]   ✔ file_read (2ms)
+[ocr]   ▶ code_search case_sensitive=false file_patterns=[*.py] search_text=mkdtemp
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ file_read file_path=tests/test_imputer.py
+[ocr]   ✔ file_read (3ms)
+[ocr]   ▶ file_read file_path=nufi/impute.py start_line=180 end_line=250
+[ocr]   ✔ file_read (2ms)
+[ocr]   ▶ file_read end_line=200 file_path=nufi/agent.py start_line=188
+[ocr]   ✔ file_read (2ms)
+[ocr]   ▶ code_comment "nufi/agent.py"
 [ocr]   ✔ code_comment (0s)
-[ocr]   ▶ file_read end_line=215 file_path=nufi/kernels/torch_kernels.py start_line=185
+[ocr]   ▶ code_search case_sensitive=true file_patterns=[nufi/impute.py] search_text=self\.perm_
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ code_search case_sensitive=true file_patterns=[nufi/impute.py] search_text=self\.alphas_
+[ocr]   ✔ code_search (3ms)
+[ocr]   ▶ code_search case_sensitive=true file_patterns=[nufi/impute.py] search_text=self\.n_frequencies_
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ code_comment "setup.py"
+[ocr]   ✔ code_comment (1ms)
+[ocr]   ▶ file_find case_sensitive=false query_name=perm_
+[ocr]   ✔ file_find (3ms)
+[ocr]   ▶ code_comment "tests/test_agent.py"
+[ocr]   ✔ code_comment (0s)
+[ocr]   ▶ file_read_diff
+[ocr]   ✔ file_read_diff (0s)
+[ocr]   ▶ code_comment "setup.py"
+[ocr]   ✔ code_comment (1ms)
+[ocr]   ▶ file_read end_line=180 file_path=nufi/impute.py start_line=150
 [ocr]   ✔ file_read (2ms)
+[ocr]   ▶ code_comment "tests/test_agent.py"
+[ocr]   ✔ code_comment (0s)
+[ocr]   ▶ code_comment "nufi/wrappers.py"
+[ocr]   ✔ code_comment (0s)
+[ocr]   ▶ file_read end_line=103 file_path=setup.py start_line=98
+[ocr]   ✔ file_read (2ms)
+[ocr]   ▶ code_comment "nufi/agent.py"
+[ocr]   ✔ code_comment (0s)
 [ocr]   ▶ code_comment "tests/test_imputer.py"
 [ocr]   ✔ code_comment (0s)
-[ocr]   ▶ file_read end_line=245 file_path=nufi/impute.py start_line=236
+[ocr]   ▶ code_comment "tests/test_agent.py"
+[ocr]   ✔ code_comment (0s)
+[ocr]   ▶ code_search search_text=torch\. file_patterns=[nufi/agent.py]
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ file_read file_path=nufi/impute.py start_line=250 end_line=254
+[ocr]   ✔ file_read (2ms)
+[ocr]   ▶ file_read end_line=254 file_path=nufi/impute.py start_line=250
+[ocr]   ✔ file_read (3ms)
+[ocr]   ▶ file_read file_path=nufi/kernels/torch_kernels.py start_line=19 end_line=62
+[ocr]   ✔ file_read (3ms)
+[ocr]   ▶ file_read file_path=nufi/kernels/torch_kernels.py start_line=100 end_line=136
+[ocr]   ✔ file_read (3ms)
+[ocr]   ▶ code_comment "nufi/agent.py"
+[ocr]   ✔ code_comment (0s)
+[ocr]   ▶ code_search search_text=infill_multiindex_dataframe case_sensitive=false file_patterns=[tests/]
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ code_comment "nufi/impute.py"
+[ocr]   ✔ code_comment (0s)
+[ocr]   ▶ code_search file_patterns=[nufi/] search_text=self\.lu_\b|self\.perm_\b|self\.d_\b
+[ocr]   ✔ code_search (2ms)
+[ocr]   ▶ file_read end_line=254 file_path=nufi/impute.py start_line=124
+[ocr]   ✔ file_read (2ms)
+[ocr]   ▶ file_read file_path=nufi/impute.py start_line=137 end_line=158
 [ocr]   ✔ file_read (4ms)
-[ocr] Summary: 10 file(s) reviewed, 19 comment(s), ~1004168 token(s) used (input: ~911362, output: ~92806), 4m31s elapsed
+[ocr]   ▶ file_find query_name=test_covariance
+[ocr]   ✔ file_find (3ms)
+[ocr]   ▶ file_find query_name=benchmark
+[ocr]   ✔ file_find (3ms)
+[ocr]   ▶ file_read end_line=160 file_path=nufi/impute.py start_line=124
+[ocr]   ✔ file_read (3ms)
+[ocr] Subtask error for nufi/kernels/torch_kernels.py: LLM completion error: error parsing response json: EOF
+[ocr] Summary: 10 file(s) reviewed, 19 comment(s), ~945080 token(s) used (input: ~838016, output: ~107064), 8m21s elapsed
 
 ─── pyproject.toml:20-21 ───
-The `gpu` extra only lists `torch>=2.0.0`, which is already a core dependency (line 17). This makes
-the optional dependency a no-op. If the intent is to allow torch-free installations, `torch` should
-be removed from `dependencies` and placed only here. Otherwise, this section should be removed as
-redundant.
+The `gpu` optional dependency is redundant: `torch>=2.0.0` is already listed as a core dependency.
+Installing `nufi[gpu]` provides no additional packages. If the intent is to make torch optional
+(CPU-only mode), torch should be removed from core `dependencies` and placed only here. Otherwise,
+this extra should either contain actual GPU-specific packages (e.g., CUDA toolkit bindings) or be
+removed entirely.
 
   [project.optional-dependencies]
++ # Consider: if torch should be optional for CPU-only mode, move it from `dependencies` to this extra.
++ # Otherwise, remove this extra or list actual GPU-specific packages.
   gpu = ["torch>=2.0.0"]
 
 
-─── tests/benchmark.py:98-98 ───
-Since `pandas>=1.2.0` is required, the `ffill()` and `bfill()` methods are available and are the
-preferred (non-deprecated) API. Using `fillna(method='ffill')` triggers a `FutureWarning` in pandas
-1.4+ and will be removed in future versions. The original `.ffill().bfill()` was already correct.
-
--         spline_infilled = spline_infilled.interpolate(method='linear', axis=0).fillna(method='ffill').fillna(method='bfill')
-+         spline_infilled = spline_infilled.interpolate(method='linear', axis=0).ffill().bfill()
-
-
-─── tests/test_covariance.py:35-35 ───
-The strict inequality `np.max(np.abs(ddx)) < np.max(np.abs(lin_ddx))` has no floating-point
-tolerance. If both are numerically very close (or identical due to edge cases), this assertion
-becomes fragile. Consider adding a small relative/absolute tolerance (e.g., `np.max(np.abs(ddx)) <
-np.max(np.abs(lin_ddx)) * 0.99`) or using `<=` with an epsilon to make the test robust against
-floating-point variations.
-
--     assert np.max(np.abs(ddx)) < np.max(np.abs(lin_ddx))
-+     assert np.max(np.abs(ddx)) < np.max(np.abs(lin_ddx)) * 0.99
-
-
-─── setup.py:34-36 ───
-The check `os.environ.get("NUIFI_NO_OPENMP")` uses Python truthiness, so an empty string (`""`) or
-`"0"` will be treated as falsy and OpenMP will remain enabled — contrary to user intent. Since the
-variable is named `NUIFI_NO_OPENMP`, its mere presence should be sufficient to indicate disabling.
-Use `"NUIFI_NO_OPENMP" in os.environ` to check for key existence instead, which handles empty
-strings and other edge cases correctly.
-
-- if os.environ.get("NUIFI_NO_OPENMP"):
-+ if "NUIFI_NO_OPENMP" in os.environ:
-      ext_compiler_args = []
-      ext_linker_args = []
-
-
-─── setup.py:57-57 ───
-Using `print()` for build-time warnings bypasses Python's standard warning filtering and writes to
-stdout rather than stderr. Consider using `import warnings` and `warnings.warn(...)` instead, which
-allows users to suppress or escalate these warnings via standard Python warning filters (e.g., `-W`
-flag or `PYTHONWARNINGS`).
-
--             print("WARNING: OpenMP not found. Install libomp via 'brew install libomp' for better performance.")
-+             import warnings
-+             warnings.warn("OpenMP not found. Install libomp via 'brew install libomp' for better performance.")
-
-
-─── setup.py:86-86 ───
-Using `print()` for build-time warnings bypasses Python's standard warning filtering and writes to
-stdout rather than stderr. Consider using `warnings.warn(...)` instead, which allows users to
-suppress or escalate these warnings via standard Python warning filters.
-
--             print("WARNING: OpenMP not supported by compiler, disabling.")
-+             warnings.warn("OpenMP not supported by compiler, disabling.")
-
-
-─── setup.py:43-46 ───
-Only two Homebrew paths are checked for libomp. Users who installed libomp via MacPorts
-(`/opt/local/lib/libomp`) or a custom prefix will not get OpenMP support despite having it
-available. Consider also checking `os.environ.get("LIBOMP_PATH")` or running `brew --prefix libomp`
-as a subprocess to auto-detect the correct path.
-
-          libomp_candidates = [
-              "/opt/homebrew/opt/libomp",   # Apple Silicon Homebrew
-              "/usr/local/opt/libomp",       # Intel Homebrew
-+             "/opt/local/lib/libomp",       # MacPorts
-          ]
-+         # Also allow explicit override via environment variable
-+         env_libomp = os.environ.get("LIBOMP_PATH")
-+         if env_libomp:
-+             libomp_candidates.insert(0, env_libomp)
-
-
-─── nufi/wrappers.py:40-43 ───
-When `keep_time_col=True`, `set_index(time_col)` makes the index inherit the column name (e.g.,
-`'timestamp'`), and then `pd_df[time_col] = time_values` creates a column with the same name. This
-results in the index and a column sharing an identical label, which is ambiguous and violates pandas
-conventions. Operations like `df.reset_index()` would fail with a conflict, and `df['timestamp']` is
-ambiguous.
-
-Consider giving the index a distinct name to avoid collision, e.g., set `pd_df.index.name = None` or
-rename it to something like `f'_{time_col}_index'` after the `set_index` call.
-
-          if keep_time_col:
-              time_values = pd_df[time_col].copy()
-              pd_df = pd_df.set_index(time_col)
-+             pd_df.index.name = None  # avoid name collision with the column
-              pd_df[time_col] = time_values
-
-
 ─── nufi/agent.py:78-88 ───
-Backward-incompatible parsing: old-format snapshots (without UUIDs) whose step names contain
-underscores are parsed incorrectly.
-
-Old format: `ver_{timestamp}_{step_name}.csv`
-New format: `ver_{timestamp}_{uuid_hex}_{step_name}.csv`
-
-When an old-format file like `ver_1680000000_pre_infill.csv` (step_name="pre_infill") is parsed,
-`parts` = ['ver','1680000000','pre','infill.csv'] (len=4), so it matches the `len(parts) >= 4`
-branch. This incorrectly treats 'pre' as a UUID segment, producing version_id='ver_1680000000_pre'
-instead of 'ver_1680000000'. This makes the snapshot unreachable via `revert_to_version()` and
-silently breaks access to existing history.
-
-Suggestion: detect whether parts[2] is an 8-char hex UUID (e.g., `re.match(r'^[0-9a-f]{8}$',
-parts[2])`). If not, fall back to the old 2-segment version_id logic.
+**Backward compatibility bug**: The new version ID format (`ver_<ts>_<uuid8>`) breaks parsing of
+legacy snapshots. Old filenames like `ver_1234567890_pre_infill.csv` split into 4 parts (ver, ts,
+"pre", "infill.csv"), which now matches `len(parts) >= 4` and incorrectly produces
+`version_id="ver_1234567890_pre"` and `step_name="infill"` instead of `"ver_1234567890"` /
+`"pre_infill"`. This causes `revert_to_version` to fail for any pre-upgrade snapshots, since the log
+file references the old-style version ID. Consider detecting the UUID segment (e.g., via a regex
+like `re.match(r'^[a-f0-9]{8}$', parts[2])`) to distinguish old vs new formats, or use a delimiter
+other than underscore in the version ID.
 
                   for f in files:
                       parts = f.split("_")
 -                     if len(parts) >= 4:
-+                     # New format: ver_{timestamp}_{uuid_hex8}_{step_name}.csv
-+                     # Old format: ver_{timestamp}_{step_name}.csv
-+                     if len(parts) >= 4 and re.match(r'^[0-9a-f]{8}$', parts[2]):
++                     # New format: ver_<ts>_<uuid8>_<step>.csv (≥5 parts with hex UUID)
++                     if len(parts) >= 4 and re.match(r'^[a-f0-9]{8}$', parts[2]):
                           version_id = f"{parts[0]}_{parts[1]}_{parts[2]}"
                           step_name = "_".join(parts[3:]).replace(".csv", "")
 -                     elif len(parts) == 3:
@@ -309,237 +230,351 @@ parts[2])`). If not, fall back to the old 2-segment version_id logic.
                           step_name = parts[1].replace(".csv", "")
 
 
-─── nufi/agent.py:22-22 ───
-Class-level `_lock` serializes all `TransformationTracker` instances globally, even when operating
-on independent directories. An instance-level lock (e.g., `self._lock = threading.Lock()` in
-`__init__`) would allow concurrent trackers to operate in parallel.
+─── setup.py:66-80 ───
+If `tempfile.mkdtemp()` raises an exception (e.g., PermissionError), `tmpdir` is never assigned. The
+`finally` block then raises a `NameError`, which masks the original failure and produces a confusing
+error message. Move `mkdtemp()` inside the `try` block so the `finally` block only executes cleanup
+when `tmpdir` was successfully created.
 
-Additionally, `save_snapshot()` writes the CSV under lock but calls `self.log_transformation()`
-outside the critical section. Between those two operations another thread could interleave, causing
-the log order to diverge from the actual save order. Consider wrapping both the CSV write and the
-log call in a single `with self._lock:` block to make `save_snapshot` atomic.
+          has_openmp = False
+-         tmpdir = tempfile.mkdtemp()
++         tmpdir = None
+          try:
++             tmpdir = tempfile.mkdtemp()
+              test_file = os.path.join(tmpdir, "test.c")
+              with open(test_file, "w") as f:
+                  f.write("#include <omp.h>\nint main(void) { return omp_get_num_threads(); }\n")
+              cc = os.environ.get("CC", "cc")
+              cmd = [cc, "-fopenmp", test_file, "-o", os.path.join(tmpdir, "test")]
+              res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+              if res.returncode == 0:
+                  has_openmp = True
+          except Exception:
+              pass
+          finally:
++             if tmpdir is not None:
+              shutil.rmtree(tmpdir)
 
--     _lock = threading.Lock()
-+     # Instance-level lock would reduce contention for independent trackers.
-+     # If class-level serialization is intentional (e.g., global filesystem safety),
-+     # ensure save_snapshot is atomic: wrap both CSV write + log_transformation
-+     # in a single with self._lock block.
 
+─── tests/test_agent.py:75-77 ───
+This test expects `ValueError`, but the actual implementation raises `TypeError` for an empty
+DataFrame. When `pd.DataFrame(columns=["timestamp", "signal"])` is created, the empty "timestamp"
+column has dtype `object`. After `set_index("timestamp")`, the index dtype remains `object`, which
+fails the `is_numeric_dtype` check at agent.py:194 and raises `TypeError`. Change to
+`assertRaises(TypeError)` or add `TypeError` to the tuple.
 
-─── tests/test_agent.py:73-77 ───
-The test expects `ValueError`, but the `impute_dataframe` code path for an empty DataFrame with
-`time_col="timestamp"` reaches the index-type check first. An empty DataFrame created via
-`pd.DataFrame(columns=["timestamp", "signal"])` has `object`-dtype columns, so after
-`set_index("timestamp")` the index is non-numeric, and the function raises `TypeError` (agent.py
-line 195) before any `ValueError` can be raised. This test will fail.
-
-Suggestion: either change the expected exception to `TypeError`, or use `(TypeError, ValueError)` to
-be safe, and consider adding a comment explaining which code path triggers the error.
-
-      def test_impute_dataframe_empty(self):
-          """Edge case: empty DataFrame should raise or return gracefully."""
           empty_df = pd.DataFrame(columns=["timestamp", "signal"])
 -         with self.assertRaises(ValueError):
 +         with self.assertRaises(TypeError):
               impute_dataframe(empty_df, time_col="timestamp")
 
 
-─── tests/test_agent.py:83-89 ───
-The test only verifies that the result column is still all-NaN, but ignores the `diagnostics` dict
-returned by `impute_dataframe`. When all values are NaN, the source code (agent.py lines 234-243)
-sets `"stability_flags": ["NO_OBSERVATIONS"]` and `"snr_db": None`. Asserting on these would catch
-regressions where the diagnostics path silently breaks or the function fails to handle this edge
-case properly.
+─── setup.py:43-51 ───
+The macOS OpenMP detection only checks two hardcoded Homebrew paths. If libomp is installed
+elsewhere (e.g., via Conda, MacPorts, or a custom prefix), OpenMP will be silently disabled,
+potentially degrading performance. Consider also checking a user-configurable environment variable
+(e.g., `LIBOMP_ROOT`) or attempting to use `pkg-config --cflags --libs libomp` for a more robust
+detection mechanism.
 
-Suggestion: add assertions on the diagnostics dict, e.g., `self.assertIn("NO_OBSERVATIONS",
-diagnostics["signal"]["stability_flags"])`.
+          libomp_candidates = [
+              "/opt/homebrew/opt/libomp",   # Apple Silicon Homebrew
+              "/usr/local/opt/libomp",       # Intel Homebrew
+          ]
++         # Also support user-specified path via environment variable
++         env_libomp = os.environ.get("LIBOMP_ROOT")
++         if env_libomp:
++             libomp_candidates.insert(0, env_libomp)
+          libomp_path = None
+          for candidate in libomp_candidates:
+              if os.path.isdir(candidate):
+                  libomp_path = candidate
+                  break
 
+
+─── tests/test_agent.py:93-100 ───
+`pd.testing.assert_frame_equal` expects near-exact equality, but `impute_dataframe` performs NUDFT
+fitting/reconstruction which introduces floating-point differences even when there are no NaNs. This
+test may fail due to numerical precision rather than a real bug. Consider using `assert_frame_equal`
+with relaxed tolerances (e.g., `rtol=1e-3, atol=1e-3`) or checking that the imputed values are close
+to the originals with `np.allclose`.
+
+          clean_df = pd.DataFrame({"timestamp": [1.0, 2.0, 3.0], "signal": [10.0, 20.0, 30.0]})
+          result_df, _ = impute_dataframe(
+              clean_df,
+              time_col="timestamp",
+              log_path=self.test_log,
+              history_dir=self.test_history
+          )
+-         pd.testing.assert_frame_equal(clean_df, result_df)
++         pd.testing.assert_frame_equal(clean_df, result_df, atol=1e-2)
+
+
+─── nufi/wrappers.py:40-43 ───
+When `keep_time_col=True`, the time column is re-added via `pd_df[time_col] = time_values` after
+`set_index(time_col)`. This appends the column to the end of the DataFrame, altering the original
+column order (the time column moves from its original position to the last position). Downstream
+code that assumes a specific column layout — e.g., column-indexed access or positional slicing — may
+break silently. Consider using `pd_df.insert(loc, time_col, time_values)` to preserve the original
+column position.
+
+          if keep_time_col:
+              time_values = pd_df[time_col].copy()
++             col_pos = pd_df.columns.get_loc(time_col)
+              pd_df = pd_df.set_index(time_col)
+-             pd_df[time_col] = time_values
++             pd_df.insert(col_pos, time_col, time_values)
+
+
+─── nufi/agent.py:22-22 ───
+**Class-level lock causes unnecessary cross-instance contention**: `_lock` is a class attribute
+shared by all `TransformationTracker` instances, even those managing completely independent
+directories. Two unrelated trackers (e.g., one for `log_dir_a` and one for `log_dir_b`) will
+serialize against each other, reducing throughput in multi-threaded scenarios. Consider making the
+lock per-instance by moving it to `__init__`: `self._lock = threading.Lock()`.
+
+-     _lock = threading.Lock()
++     # Remove class-level _lock; use per-instance lock initialized in __init__
+
+
+─── nufi/agent.py:25-26 ───
+**Weak path traversal check**: Checking only for `".."` after `os.path.normpath` does not prevent an
+attacker from providing an absolute path like `/etc/passwd` as `log_path`. While
+`TransformationTracker` is typically called internally, `log_path` and `history_dir` are exposed
+through `impute_dataframe`'s public API. Consider either (a) restricting both paths to a whitelisted
+base directory with `os.path.commonpath`, or (b) ensuring paths are relative-only and resolved
+against a safe root.
+
+-         if ".." in os.path.normpath(log_path) or ".." in os.path.normpath(history_dir):
+-             raise ValueError("Path traversal detected in log_path or history_dir.")
++         safe_root = os.path.abspath(os.getcwd())
++         for path in (log_path, history_dir):
++             resolved = os.path.abspath(path)
++             if os.path.commonpath([safe_root, resolved]) != safe_root:
++                 raise ValueError(f"Path {path} is outside the allowed directory.")
+
+
+─── nufi/agent.py:339-355 ───
+**New parameters not documented in docstring**: `solver`, `max_iter`, `tol`, and `device` were added
+to `plot_diagnostics` but are missing from the function's docstring. This makes it unclear to users
+what these parameters control and what valid values are. Additionally, `device` lacks a type hint
+(should be `str = None` or `Optional[str] = None`).
+
+  def plot_diagnostics(
+      original_df: pd.DataFrame,
+      infilled_df: pd.DataFrame,
+      diagnostics: dict,
+      time_col: str = None,
+      columns: list = None,
+      save_path: str = None,
+      show_plot: bool = True,
+      solver: str = 'direct',
+      max_iter: int = 100,
+      tol: float = 1e-5,
+      device: str = None
+  ):
+      """
+      Generates an interactive, publication-ready visualization of the infilling results.
+      Plots both time-domain reconstructions and frequency-domain power spectrum densities.
++ 
++     Parameters
++     ----------
++     ...
++     solver : str, default='direct'
++         Linear system solver for PSD computation ('direct' or 'cg').
++     max_iter : int, default=100
++         Maximum iterations for CG solver.
++     tol : float, default=1e-5
++         Tolerance for CG solver convergence.
++     device : str, optional
++         Hardware accelerator device for PSD computation.
+      """
+
+
+─── tests/test_imputer.py:144-144 ───
+The `random_state=42` added to the imputer constructor makes every `transform(stochastic=True)` call
+deterministic: `np.random.RandomState(42)` produces the same noise sequence on each call. This
+contradicts the test's purpose of verifying non-deterministic stochastic imputation. The assertions
+at lines 160-161 (`X_filled_1[1,0] != X_filled_2[1,0]` etc.) will fail because the two calls produce
+identical filled arrays. Fix: remove `random_state=42` from this test, since this test specifically
+validates non-deterministic behavior. Use `random_state` only in tests that need reproducibility
+(like `test_stochastic_imputation_multicol`).
+
+-     imputer = NufiImputer(method='direct', alpha=1e-4, covariance_compensation=False, random_state=42)
++     imputer = NufiImputer(method='direct', alpha=1e-4, covariance_compensation=False)
+
+
+─── tests/test_imputer.py:190-196 ───
+The same `imputer` instance is reused across three consecutive `fit_transform()` calls with data of
+different shapes (3×2, 1×2, 3×1). While `fit()` currently resets all internal state (`self.lu_`,
+`self.d_`, `self.perm_`, `self.alphas_`, `self.n_frequencies_`), this is fragile — a future state
+variable that isn't reset in `fit()` could leak between scenarios. Each edge case should use a fresh
+`NufiImputer` instance to guarantee isolation and make the test self-documenting.
+
+-     imputer = NufiImputer(covariance_compensation=True)
+-     X_filled = imputer.fit_transform(X_all_nan)
++     imputer1 = NufiImputer(covariance_compensation=True)
++     X_filled = imputer1.fit_transform(X_all_nan)
+      assert np.isnan(X_filled[:, 1]).all()  # column with all NaNs remains NaN or handles gracefully
+      
+      # 2. Single-row input
+      X_single_row = np.array([[1.0, np.nan]], dtype=np.float64)
+-     X_filled_row = imputer.fit_transform(X_single_row)
++     imputer2 = NufiImputer(covariance_compensation=True)
++     X_filled_row = imputer2.fit_transform(X_single_row)
+
+
+─── tests/test_agent.py:79-89 ───
+This test asserts that an all-NaN column remains all-NaN after imputation, but the
+`NufiImputer.transform()` behavior for columns with zero valid observations is not explicitly
+defined in the implementation. If the imputer applies any default fill value or raises an exception,
+this assertion will fail or give a false signal. Consider verifying the behavior by inspecting the
+`NufiImputer.transform` logic, or document this as an expected contract rather than an
+implementation coincidence.
+
+      def test_impute_dataframe_all_nan(self):
+          """Edge case: column with all NaN values."""
+          all_nan_df = self.df.copy()
+          all_nan_df["signal"] = np.nan
           result_df, diagnostics = impute_dataframe(
               all_nan_df,
               time_col="timestamp",
               log_path=self.test_log,
               history_dir=self.test_history
           )
++         # When all values are NaN, the imputer cannot fit; expect NaN output or error
           self.assertTrue(result_df["signal"].isna().all())
-+         self.assertIn("signal", diagnostics)
-+         self.assertIn("NO_OBSERVATIONS", diagnostics["signal"]["stability_flags"])
++         self.assertIn("NO_OBSERVATIONS", diagnostics.get("signal", {}).get("stability_flags", []))
 
 
-─── nufi/impute.py:121-122 ───
-If all candidate `n_f` values fail with RuntimeError (e.g., all SVD calls fail), `best_n_freq` and
-`best_alpha` retain their initial defaults silently. No warning is emitted that GCV tuning failed
-entirely. In `transform()`, `solve_tikhonov_nudft` (line 202) is called without error handling, so
-the same underlying failure will crash at inference time with a cryptic PyTorch RuntimeError.
-Consider detecting this case after the loop and either raising a clear error or falling back to a
-robust default with a prominent warning.
+─── nufi/agent.py:51-66 ───
+**Atomicity gap between CSV write and log write**: `save_snapshot` writes the CSV inside the lock
+but calls `self.log_transformation(log_entry)` outside it. If `log_transformation` fails (or another
+thread reads between these two operations), the CSV file exists on disk without a corresponding log
+entry, creating an orphaned snapshot. Consider moving the log write inside the same lock block to
+ensure atomicity of the snapshot+log operation.
 
-+             if best_gcv == float('inf'):
-+                 import warnings
-+                 warnings.warn(f"All GCV candidates failed for column {col_idx}; using fallback parameters.")
-              self.alphas_.append(best_alpha)
-              self.n_frequencies_.append(best_n_freq)
+          with self._lock:
+              try:
+                  df.to_csv(filepath, index=True)
+              except Exception as e:
+                  raise TransformationLoggingError(f"Failed to save data snapshot {filepath}: {e}")
+              
+          log_entry = {
+              "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+              "event": "snapshot_saved",
+              "version_id": version_id,
+              "step_name": step_name,
+              "columns": list(df.columns),
+              "shape": df.shape,
+              "filepath": filepath
+          }
+-         self.log_transformation(log_entry)
++             # Write log within the same lock to ensure atomicity
++             try:
++                 with open(self.log_path, "a", encoding="utf-8") as f:
++                     f.write(json.dumps(log_entry) + "\n")
++             except Exception as e:
++                 # Rollback: remove orphaned CSV on log failure
++                 try:
++                     os.remove(filepath)
++                 except OSError:
++                     pass
++                 raise TransformationLoggingError(f"Failed to write to transformation log: {e}")
 
 
-─── nufi/impute.py:141-152 ───
-`perm_small` returned by `covariance_compensation` is captured but never used. `self.perm_` is
-unconditionally set to `np.arange(n_cols)` (identity permutation), which discards the actual LDL^T
-permutation ordering. If any downstream code relies on `self.perm_` together with `self.lu_` for
-solving linear systems or applying the compensation, it will produce incorrect results. Consider
-expanding `perm_small` to the full column space similarly to how `lu_small` and `d_small` are
-expanded, so that `self.perm_` reflects the correct permutation.
+─── nufi/agent.py:194-198 ───
+**Breaking API change without migration path**: The new `is_numeric_dtype` check in
+`impute_dataframe` and `plot_diagnostics` will raise `TypeError` for users who previously passed
+DataFrames with string-based or datetime-based indices (e.g., `"2024-01-01"` strings). While the
+requirement for numeric timestamps is technically correct, this is a hard breaking change. Consider
+either (a) attempting automatic conversion via `pd.to_numeric(df_copy.index, errors='raise')` before
+failing, or (b) documenting this as a breaking change with clear migration guidance in the error
+message.
+
+      if not pd.api.types.is_numeric_dtype(df_copy.index):
++         try:
++             # Attempt conversion for datetime-like or string timestamps
++             numeric_idx = pd.to_numeric(df_copy.index, errors='coerce')
++             if numeric_idx.isna().any():
++                 raise ValueError("Index contains non-convertible values")
++             df_copy.index = numeric_idx.astype(np.float64)
++         except Exception:
+          raise TypeError(
+              f"DataFrame index must be numeric (timestamps). "
+-             f"Got dtype={df_copy.index.dtype}. Provide a numeric time column via `time_col`."
++                 f"Got dtype={df_copy.index.dtype}. Provide a numeric time column via `time_col` "
++                 f"or ensure your index contains numeric values."
+          )
+
+
+─── nufi/impute.py:239-239 ───
+`np.random.RandomState()` only accepts an integer seed or `None`. If a user passes a
+`numpy.random.RandomState` instance (standard scikit-learn convention), this will raise `ValueError:
+Input must be an integer`. Use `sklearn.utils.check_random_state(self.random_state)` to handle
+`int`, `RandomState`, and `None` correctly.
+
+-                     rng = np.random.RandomState(self.random_state) if self.random_state is not None else np.random
++                     from sklearn.utils import check_random_state
++                     rng = check_random_state(self.random_state)
+
+
+─── nufi/impute.py:141-146 ───
+The `perm_small` vector returned by `covariance_compensation()` (the LDLᵀ permutation) is discarded
+and replaced with `np.arange(n_cols)`. While `self.perm_` is not currently consumed in `transform`,
+the stored attribute becomes incorrect, which could cause subtle bugs if future code relies on it
+for column reordering. Consider mapping `perm_small` through `valid_cols` to preserve the correct
+permutation.
 
                   lu_small, d_small, perm_small = covariance_compensation(X_list, device=self.device)
                   
                   # Expand to full size
                   self.lu_ = np.eye(n_cols)
                   self.d_ = np.eye(n_cols)
-+                 # Map perm_small indices back to full column space
++                 # Map perm_small indices through valid_cols, leaving excluded columns at identity
                   self.perm_ = np.arange(n_cols)
 +                 for i, c_i in enumerate(valid_cols):
 +                     self.perm_[c_i] = valid_cols[perm_small[i]]
-                  
-                  # Map small matrices back to full size
-                  for i, c_i in enumerate(valid_cols):
-                      for j, c_j in enumerate(valid_cols):
-                          self.lu_[c_i, c_j] = lu_small[i, j]
-                          self.d_[c_i, c_j] = d_small[i, j]
 
 
-─── nufi/impute.py:111-114 ───
-The warning message always says "SVD failed", but the `RuntimeError` may originate from
-`optimize_alpha_gcv` (line 100-101) rather than from a direct SVD call. Consider making the message
-more precise (e.g., "Candidate evaluation failed...") to aid debugging.
+─── nufi/impute.py:97-111 ───
+The try-except block wraps both SVD and subsequent tensor operations (`matmul`, `sum`, `to`). Only
+`torch.linalg.svd` and the internal SVD inside `optimize_alpha_gcv` are expected to raise
+`RuntimeError`. Wrapping the matrix multiplications and GCV scoring in the same try block could
+silently swallow unrelated `RuntimeError` bugs (e.g., shape mismatches, out-of-memory). Consider
+narrowing the try block to only the SVD calls.
 
-                  except RuntimeError as e:
-                      import warnings
--                     warnings.warn(f"SVD failed for column {col_idx}, n_f={n_f}: {e}. Skipping candidate.")
-+                     warnings.warn(f"Candidate evaluation failed for column {col_idx}, n_f={n_f}: {e}. Skipping candidate.")
-                      continue
-
-
-─── nufi/kernels/torch_kernels.py:52-58 ───
-**Issue (medium): O(N²) memory via outer product.**
-
-The expression `t_timestamps.unsqueeze(1) * f_k.unsqueeze(0)` allocates a dense `(n_valid × N)`
-complex128 tensor. For long time series (e.g., N=100k), this requires ~150 GB of memory and will
-cause an OOM error. 
-
-**Suggestions:**
-- Add a guard that falls back to a batched or iterative computation when `N` exceeds a threshold
-(e.g., > 10,000).
-- Alternatively, route large-N cases through `compute_Fast_ND_NUDFT` automatically.
-- Consider using `torch.einsum` with a chunked approach or a memory-mapped implementation.
-
-          f_k = torch.linspace(0, nyquist_frequency, N, dtype=torch.float64, device=dev)
-  
-          # Standard NUDFT: A[n,k] = exp(-2πi * t_n * f_k), then sum over n
-          t_timestamps = torch.tensor(v_timestamps, dtype=torch.float64, device=dev)
-          t_data_all = torch.tensor(v_data, dtype=torch.float64, device=dev)
-+ 
-+         # Guard against excessive memory for large N
-+         MAX_MEM_N = 10_000
-+         if N > MAX_MEM_N:
-+             import warnings
-+             warnings.warn(
-+                 f"N={N} is large; compute_ND_NUDFT may consume excessive memory. "
-+                 f"Consider using compute_Fast_ND_NUDFT."
-+             )
-+ 
-          exponent = -2.0j * np.pi * t_timestamps.unsqueeze(1) * f_k.unsqueeze(0)
-          summation = torch.sum(t_data_all.to(torch.complex128).unsqueeze(1) * torch.exp(exponent), dim=0)
+                  try:
+                      if self.alpha == 'auto':
+                          candidate_alphas = [1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0]
+                          opt_alpha, U, S, y_tilde, y_norm_sq = optimize_alpha_gcv(
+                              A, t_data, candidate_alphas, return_svd=True
+                          )
+                      else:
+                          opt_alpha = self.alpha if self.alpha is not None else 1e-4
+                          U, S, Vh = torch.linalg.svd(A, full_matrices=False)
+                          y_complex = t_data.to(torch.complex128)
+                          y_tilde = torch.matmul(U.adjoint(), y_complex)
+                          y_norm_sq = torch.sum(torch.abs(y_complex) ** 2)
++                 except RuntimeError as e:
++                     import warnings
++                     warnings.warn(f"SVD failed for column {col_idx}, n_f={n_f}: {e}. Skipping candidate.")
++                     continue
+                      
+                      score = compute_gcv_from_svd(S, y_tilde, y_norm_sq, opt_alpha, N_val)
+-                 except RuntimeError as e:
 
 
-─── nufi/kernels/torch_kernels.py:126-134 ───
-**Issue (high): NaN-to-zero replacement can produce a singular covariance matrix, leading to a
-potential crash or meaningless LDL decomposition.**
+─── nufi/impute.py:121-122 ───
+If every candidate `n_f` fails SVD for a column (all iterations hit `continue`), `best_gcv` remains
+`float('inf')` and the fallback alpha/freq are appended silently. Consider adding a warning when GCV
+tuning produced no valid score, so users know the imputer fell back to untuned defaults for this
+column.
 
-`np.nan_to_num(covariance_matrix, nan=0.0)` replaces NaN entries (arising from zero-variance
-columns) with zeros. This can make the matrix singular or non-positive-definite, which may cause
-`scipy.linalg.ldl()` to raise a `LinAlgError` or return degenerate D factors. The existing warning
-is passive and does not prevent the failure.
-
-Additionally, concatenating real and imaginary parts doubles the feature dimension (`2M` columns for
-`M` signals). The caller in `nufi/impute.py` only maps the top-left `[0:M, 0:M]` sub-block, so the
-imaginary-part correlations are computed but silently discarded.
-
-**Suggestions:**
-- Before `nan_to_num`, check if NaN columns exist and drop them (or use a regularization like `cov +
-eps * I`).
-- Wrap `scipy.linalg.ldl()` in a try/except and fall back to a regularized Cholesky or
-eigendecomposition.
-- Consider whether concatenating real and imaginary parts is the intended design; if only real-part
-correlation is needed, skip the imaginary concatenation to avoid the doubled dimension.
-
--     if np.any(np.isnan(covariance_matrix)):
-+     nan_mask = np.any(np.isnan(covariance_matrix), axis=0)
-+     if np.any(nan_mask):
-          import warnings
--         warnings.warn("Covariance matrix contains NaN entries; degenerate columns detected.")
-+         n_nan = nan_mask.sum()
-+         warnings.warn(f"Covariance matrix contains NaN entries in {n_nan} columns; degenerate columns detected. Applying regularization.")
-+         # Drop degenerate rows/columns instead of zero-filling
-+         valid_idx = np.where(~nan_mask)[0]
-+         if len(valid_idx) == 0:
-+             raise ValueError("All columns are degenerate; cannot compute covariance compensation.")
-+         covariance_matrix = covariance_matrix[np.ix_(valid_idx, valid_idx)]
-      
--     covariance_matrix = np.nan_to_num(covariance_matrix, nan=0.0)
-+     # Regularize to ensure positive-definiteness for LDL^T
-+     eps = 1e-10
-+     covariance_matrix = covariance_matrix + eps * np.eye(covariance_matrix.shape[0])
-  
-      # Step 4: Perform LDL^T decomposition
-      # LDL^T factorizes A = P * L * D * L^T
-+     try:
-      lu, d, perm = scipy.linalg.ldl(covariance_matrix)
-+     except np.linalg.LinAlgError:
-+         raise ValueError("LDL decomposition failed; covariance matrix may be singular.")
-
-
-─── nufi/kernels/torch_kernels.py:87-91 ───
-**Issue (medium): `np.interp` requires monotonically increasing `xp`, but `v_timestamps` is not
-guaranteed to be sorted.**
-
-If the input timestamps are unsorted (e.g., a DataFrame with a non-monotonic time index),
-`np.interp` will produce incorrect interpolated values without any error or warning. This is a
-silent correctness bug.
-
-**Suggestion:** Sort `v_timestamps` and `v_data` together before calling `np.interp`, or validate
-that `v_timestamps` is monotonically increasing and raise an informative error if not.
-
-          # Generate uniform grid using min/max of valid timestamps
-          t_min, t_max = np.min(v_timestamps), np.max(v_timestamps)
-          uniform_grid = np.linspace(t_min, t_max, N)
--         # Interpolate onto uniform grid
-+         # Ensure timestamps are sorted for np.interp (requires monotonic increasing)
-+         if not np.all(np.diff(v_timestamps) >= 0):
-+             sort_idx = np.argsort(v_timestamps)
-+             v_timestamps = v_timestamps[sort_idx]
-+             v_data = v_data[sort_idx]
-          uniform_data = np.interp(uniform_grid, v_timestamps, v_data)
-
-
-─── tests/test_imputer.py:144-148 ───
-**Critical bug**: `random_state=42` causes the RNG to be seeded identically on every `transform()`
-call (line 239 of `impute.py` creates a fresh `np.random.RandomState(42)` each time). Both
-`X_filled_1` and `X_filled_2` will receive identical noise, so the assertions at lines 160–161 will
-**fail**.
-
-**Suggestion**: Either remove `random_state=42` from this test to restore non-deterministic
-behavior, or restructure into two separate tests — one verifying reproducibility with a fixed seed,
-another verifying non-determinism without a seed.
-
--     imputer = NufiImputer(method='direct', alpha=1e-4, covariance_compensation=False, random_state=42)
-+     # Remove random_state to preserve non-deterministic behavior
-+     imputer = NufiImputer(method='direct', alpha=1e-4, covariance_compensation=False)
-      imputer.fit(X)
-      
-      X_filled_1 = imputer.transform(X, stochastic=True, stochastic_scale=1.5)
-      X_filled_2 = imputer.transform(X, stochastic=True, stochastic_scale=1.5)
-
-
-
-Processing review output into task list...
-
-✅ **Successfully generated XML task list with 19 items.**
-Copy the block below for issue import:
++             if best_gcv == float('inf'):
++                 import warnings
++                 warnings.warn(
++                     f"All GCV candidates failed for column {col_idx}. "
++                     f"Using fallback alpha={best_alpha}, n_freq={best_n_freq}."
++                 )
+              self.alphas_.append(best_alpha)
+              self.n_frequencies_.append(best_n_freq)

@@ -22,13 +22,14 @@ class TransformationTracker:
     """
 
     def __init__(self, log_path: str = "nufi_transformations.log", history_dir: str = ".nufi_history"):
-        self.log_path = os.path.realpath(log_path)
-        self.history_dir = os.path.realpath(history_dir)
-        cwd = os.path.realpath(os.getcwd())
-        if not self.log_path.startswith(cwd + os.sep) and self.log_path != cwd:
-            raise ValueError(f"log_path must be within current working directory: {log_path}")
-        if not self.history_dir.startswith(cwd + os.sep) and self.history_dir != cwd:
-            raise ValueError(f"history_dir must be within current working directory: {history_dir}")
+        safe_root = os.path.realpath(os.getcwd())
+        resolved_log = os.path.realpath(log_path)
+        resolved_hist = os.path.realpath(history_dir)
+        for path, resolved in ((log_path, resolved_log), (history_dir, resolved_hist)):
+            if os.path.commonpath([safe_root, resolved]) != safe_root:
+                raise ValueError(f"Path {path} is outside the allowed directory.")
+        self.log_path = resolved_log
+        self.history_dir = resolved_hist
         self._lock = threading.RLock()
         
         with self._lock:
@@ -67,7 +68,15 @@ class TransformationTracker:
                 "shape": df.shape,
                 "filepath": filepath
             }
-            self.log_transformation(log_entry)
+            try:
+                self.log_transformation(log_entry)
+            except Exception as e:
+                # Rollback: remove orphaned CSV on log failure
+                try:
+                    os.remove(filepath)
+                except OSError:
+                    pass
+                raise TransformationLoggingError(f"Failed to write to transformation log: {e}")
         return version_id
 
     def list_versions(self) -> list:
@@ -198,10 +207,18 @@ def impute_dataframe(
         df_copy = df_copy.set_index(time_col)
 
     if not pd.api.types.is_numeric_dtype(df_copy.index):
-        raise TypeError(
-            f"DataFrame index must be numeric (timestamps). "
-            f"Got dtype={df_copy.index.dtype}. Provide a numeric time column via `time_col`."
-        )
+        try:
+            # Attempt conversion for datetime-like or string timestamps
+            numeric_idx = pd.to_numeric(df_copy.index, errors='coerce')
+            if numeric_idx.isna().any():
+                raise ValueError("Index contains non-convertible values")
+            df_copy.index = numeric_idx.astype(np.float64)
+        except Exception:
+            raise TypeError(
+                f"DataFrame index must be numeric (timestamps). "
+                f"Got dtype={df_copy.index.dtype}. Provide a numeric time column via `time_col` "
+                f"or ensure your index contains numeric values."
+            )
 
     timestamps = df_copy.index.to_numpy(dtype=np.float64)
 
@@ -358,6 +375,31 @@ def plot_diagnostics(
     """
     Generates an interactive, publication-ready visualization of the infilling results.
     Plots both time-domain reconstructions and frequency-domain power spectrum densities.
+
+    Parameters
+    ----------
+    original_df : pd.DataFrame
+        Original DataFrame containing observed data (with NaNs).
+    infilled_df : pd.DataFrame
+        Infilled DataFrame containing fully imputed data.
+    diagnostics : dict
+        Rich diagnostic metadata dictionary returned by `impute_dataframe`.
+    time_col : str, optional
+        Name of the column containing timestamps. If None, the DataFrame index is used.
+    columns : list, optional
+        List of column names to visualize. If None, defaults to the first 5 columns.
+    save_path : str, optional
+        Path to save the generated visualization. If None, the plot is not saved.
+    show_plot : bool, default=True
+        Whether to display the generated plot.
+    solver : str, default='direct'
+        Linear system solver for PSD computation ('direct' or 'cg').
+    max_iter : int, default=100
+        Maximum iterations for CG solver.
+    tol : float, default=1e-5
+        Tolerance for CG solver convergence.
+    device : str, optional
+        Hardware accelerator device for PSD computation.
     """
     orig_copy = original_df.copy()
     inf_copy = infilled_df.copy()
@@ -367,10 +409,18 @@ def plot_diagnostics(
         inf_copy = inf_copy.set_index(time_col)
 
     if not pd.api.types.is_numeric_dtype(orig_copy.index):
-        raise TypeError(
-            f"DataFrame index must be numeric (timestamps). "
-            f"Got dtype={orig_copy.index.dtype}. Provide a numeric time column via `time_col`."
-        )
+        try:
+            # Attempt conversion for datetime-like or string timestamps
+            numeric_idx = pd.to_numeric(orig_copy.index, errors='coerce')
+            if numeric_idx.isna().any():
+                raise ValueError("Index contains non-convertible values")
+            orig_copy.index = numeric_idx.astype(np.float64)
+        except Exception:
+            raise TypeError(
+                f"DataFrame index must be numeric (timestamps). "
+                f"Got dtype={orig_copy.index.dtype}. Provide a numeric time column via `time_col` "
+                f"or ensure your index contains numeric values."
+            )
 
     timestamps = orig_copy.index.to_numpy(dtype=np.float64)
 

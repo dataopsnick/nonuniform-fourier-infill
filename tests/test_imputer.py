@@ -187,18 +187,20 @@ def test_imputer_edge_cases():
         [2.0, np.nan],
         [3.0, np.nan]
     ], dtype=np.float64)
-    imputer = NufiImputer(covariance_compensation=True)
-    X_filled = imputer.fit_transform(X_all_nan)
+    imputer1 = NufiImputer(covariance_compensation=True)
+    X_filled = imputer1.fit_transform(X_all_nan)
     assert np.isnan(X_filled[:, 1]).all()  # column with all NaNs remains NaN or handles gracefully
     
     # 2. Single-row input
     X_single_row = np.array([[1.0, np.nan]], dtype=np.float64)
-    X_filled_row = imputer.fit_transform(X_single_row)
+    imputer2 = NufiImputer(covariance_compensation=True)
+    X_filled_row = imputer2.fit_transform(X_single_row)
     assert np.isnan(X_filled_row[0, 1])  # single row cannot be interpolated but returns gracefully
     
     # 3. Single-column input with all values observed (no NaNs — no-op path)
     X_no_nans = np.array([[1.0], [2.0], [3.0]], dtype=np.float64)
-    X_filled_no_nans = imputer.fit_transform(X_no_nans)
+    imputer3 = NufiImputer(covariance_compensation=True)
+    X_filled_no_nans = imputer3.fit_transform(X_no_nans)
     assert np.allclose(X_no_nans, X_filled_no_nans)
     
     # 4. Invalid parameters: negative/zero alpha should raise ValueError

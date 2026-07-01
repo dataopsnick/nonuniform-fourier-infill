@@ -106,12 +106,12 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                         y_complex = t_data.to(torch.complex128)
                         y_tilde = torch.matmul(U.adjoint(), y_complex)
                         y_norm_sq = torch.sum(torch.abs(y_complex) ** 2)
-                    
-                    score = compute_gcv_from_svd(S, y_tilde, y_norm_sq, opt_alpha, N_val)
                 except RuntimeError as e:
                     import warnings
-                    warnings.warn(f"Candidate evaluation failed for column {col_idx}, n_f={n_f}: {e}. Skipping candidate.")
+                    warnings.warn(f"SVD failed for column {col_idx}, n_f={n_f}: {e}. Skipping candidate.")
                     continue
+                
+                score = compute_gcv_from_svd(S, y_tilde, y_norm_sq, opt_alpha, N_val)
                 
                 if score < best_gcv:
                     best_gcv = score
@@ -194,7 +194,8 @@ class NufiImputer(BaseEstimator, TransformerMixin):
         
         infilled_data = np.zeros_like(X_data)
         
-        rng = np.random.RandomState(self.random_state) if self.random_state is not None else np.random
+        from sklearn.utils import check_random_state
+        rng = check_random_state(self.random_state)
         
         for col_idx in range(X_data.shape[1]):
             col_data = X_data[:, col_idx]

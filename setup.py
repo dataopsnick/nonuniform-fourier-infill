@@ -46,7 +46,7 @@ else:
             "/opt/local/lib/libomp",       # MacPorts
         ]
         # Also allow explicit override via environment variable
-        env_libomp = os.environ.get("LIBOMP_PATH")
+        env_libomp = os.environ.get("LIBOMP_ROOT") or os.environ.get("LIBOMP_PATH")
         if env_libomp:
             libomp_candidates.insert(0, env_libomp)
         libomp_path = None
@@ -70,8 +70,9 @@ else:
         import shutil
 
         has_openmp = False
-        tmpdir = tempfile.mkdtemp()
+        tmpdir = None
         try:
+            tmpdir = tempfile.mkdtemp()
             test_file = os.path.join(tmpdir, "test.c")
             with open(test_file, "w") as f:
                 f.write("#include <omp.h>\nint main(void) { return omp_get_num_threads(); }\n")
@@ -83,7 +84,8 @@ else:
         except Exception:
             pass
         finally:
-            shutil.rmtree(tmpdir)
+            if tmpdir is not None:
+                shutil.rmtree(tmpdir)
 
         if has_openmp:
             ext_compiler_args = ["-fopenmp"]

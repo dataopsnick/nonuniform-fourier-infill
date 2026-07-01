@@ -18,6 +18,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Consider: if torch should be optional for CPU-only mode, move it from `dependencies` to this extra.
+# Otherwise, remove this extra or list actual GPU-specific packages.
 gpu = ["nvidia-cublas-cu12"]
 
 [tool.setuptools.packages.find]
