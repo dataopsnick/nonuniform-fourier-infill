@@ -40,25 +40,22 @@ def compute_ND_NUDFT(X_list, device=None):
         v_timestamps = timestamps[valid_mask]
         v_data = data[valid_mask]
 
-        p_n = np.diff(v_timestamps)
-        # Avoid division by zero if all timestamps are identical
-        min_p = np.nanmin(p_n) if len(p_n) > 0 and np.nanmin(p_n) > 0 else 1.0
-        max_sampling_rate = 1.0 / min_p
-        nyquist_frequency = max_sampling_rate / 2.0
-
         N = len(data)
-        f_k = np.linspace(0, nyquist_frequency, N)
+        # Estimate Nyquist frequency from median/min sampling interval
+        if len(v_timestamps) > 1:
+            p_n = np.diff(v_timestamps)
+            min_p = np.nanmin(p_n) if len(p_n) > 0 and np.nanmin(p_n) > 0 else 1.0
+            nyquist_frequency = 0.5 / max(min_p, 1e-12)
+        else:
+            nyquist_frequency = 1.0
 
-        # Move to PyTorch
-        t_p_n = torch.tensor(p_n, dtype=torch.float64, device=dev)
-        t_f_k = torch.tensor(f_k[:len(p_n)], dtype=torch.float64, device=dev)
-        t_data = torch.tensor(v_data[:-1], dtype=torch.float64, device=dev)
+        f_k = torch.linspace(0, nyquist_frequency, N, dtype=torch.float64, device=dev)
 
-        # Vectorized exponent computation
-        # exponent = -2j * pi * p_n * f_k
-        exponent = -2.0j * np.pi * t_p_n * t_f_k
-        summation = torch.zeros(N, dtype=torch.complex128, device=dev)
-        summation[:len(t_data)] = t_data.to(torch.complex128) * torch.exp(exponent)
+        # Standard NUDFT: A[n,k] = exp(-2πi * t_n * f_k), then sum over n
+        t_timestamps = torch.tensor(v_timestamps, dtype=torch.float64, device=dev)
+        t_data_all = torch.tensor(v_data, dtype=torch.float64, device=dev)
+        exponent = -2.0j * np.pi * t_timestamps.unsqueeze(1) * f_k.unsqueeze(0)
+        summation = torch.sum(t_data_all.to(torch.complex128).unsqueeze(1) * torch.exp(exponent), dim=0)
         
         results.append(summation)
 
@@ -87,8 +84,9 @@ def compute_Fast_ND_NUDFT(X_list, device=None):
         v_data = data[valid_mask]
 
         N = len(data)
-        # Generate uniform grid
-        uniform_grid = np.linspace(timestamps[0], timestamps[-1], N)
+        # Generate uniform grid using min/max of valid timestamps
+        t_min, t_max = np.min(v_timestamps), np.max(v_timestamps)
+        uniform_grid = np.linspace(t_min, t_max, N)
         # Interpolate onto uniform grid
         uniform_data = np.interp(uniform_grid, v_timestamps, v_data)
 
@@ -110,11 +108,12 @@ def covariance_compensation(X_list, device=None):
     # Step 1: Compute NUDFT results
     X_k_result = compute_ND_NUDFT(X_list, device=dev)
 
-    # Step 2: Flatten & stack the data
+    # Step 2: Flatten & stack the data (preserving phase information)
     # Move to CPU for covariance and LDL^T since scipy/pandas functions are optimized there
     flat_data = []
     for tensor in X_k_result:
-        flat_data.append(tensor.cpu().numpy().real) # Process real part for covariance
+        arr = tensor.cpu().numpy()
+        flat_data.append(np.concatenate([arr.real, arr.imag]))
 
     flat_data = np.array(flat_data).T # Shape: samples x dimensions
 
@@ -122,7 +121,13 @@ def covariance_compensation(X_list, device=None):
     # Handle any potential remaining NaNs just in case
     import pandas as pd
     df = pd.DataFrame(flat_data)
-    covariance_matrix = df.cov().fillna(0.0).to_numpy()
+    covariance_matrix = df.cov().to_numpy()
+
+    if np.any(np.isnan(covariance_matrix)):
+        import warnings
+        warnings.warn("Covariance matrix contains NaN entries; degenerate columns detected.")
+    
+    covariance_matrix = np.nan_to_num(covariance_matrix, nan=0.0)
 
     # Step 4: Perform LDL^T decomposition
     # LDL^T factorizes A = P * L * D * L^T
@@ -180,7 +185,7 @@ def compute_gcv_from_svd(s, y_tilde, y_norm_sq, alpha, N):
         return float('inf')
     return ((res_norm_sq / N) / denom).item()
 
-def optimize_alpha_gcv(A, y, alphas=None):
+def optimize_alpha_gcv(A, y, alphas=None, return_svd=False):
     """
     Finds the optimal Tikhonov regularization parameter alpha using GCV.
     """
@@ -200,6 +205,9 @@ def optimize_alpha_gcv(A, y, alphas=None):
         if score < best_score:
             best_score = score
             best_alpha = alpha
+            
+    if return_svd:
+        return best_alpha, U, S, y_tilde, y_norm_sq
     return best_alpha
 
 def solve_tikhonov_nudft(timestamps, data, f_k, alpha, solver='direct', max_iter=100, tol=1e-5, device=None):
@@ -207,6 +215,9 @@ def solve_tikhonov_nudft(timestamps, data, f_k, alpha, solver='direct', max_iter
     Solves the continuous-time NUDFT coefficients using L2/Tikhonov regularization.
     Supports 'direct' SVD/normal-equation solvers or 'cg' Conjugate Gradient.
     """
+    if alpha <= 0:
+        raise ValueError(f"Regularization parameter alpha must be positive, got {alpha}")
+
     dev = get_device(device)
     t_timestamps = torch.tensor(timestamps, dtype=torch.float64, device=dev)
     t_data = torch.tensor(data, dtype=torch.float64, device=dev)

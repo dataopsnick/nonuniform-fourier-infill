@@ -1,6 +1,7 @@
 import os
 import shutil
 import unittest
+import json
 import numpy as np
 import pandas as pd
 from unittest.mock import patch, mock_open
@@ -66,7 +67,48 @@ class TestAgentNativeLayer(unittest.TestCase):
         # Count snapshot files (.csv)
         files = os.listdir(self.test_history)
         csv_files = [f for f in files if f.endswith(".csv")]
-        self.assertEqual(len(csv_files), 2)  # pre_infill and post_infill
+        self.assertTrue(any("pre_infill" in f for f in csv_files))
+        self.assertTrue(any("post_infill" in f for f in csv_files))
+
+    def test_impute_dataframe_empty(self):
+        """Edge case: empty DataFrame should raise or return gracefully."""
+        empty_df = pd.DataFrame(columns=["timestamp", "signal"])
+        with self.assertRaises(ValueError):
+            impute_dataframe(empty_df, time_col="timestamp")
+
+    def test_impute_dataframe_all_nan(self):
+        """Edge case: column with all NaN values."""
+        all_nan_df = self.df.copy()
+        all_nan_df["signal"] = np.nan
+        result_df, diagnostics = impute_dataframe(
+            all_nan_df,
+            time_col="timestamp",
+            log_path=self.test_log,
+            history_dir=self.test_history
+        )
+        self.assertTrue(result_df["signal"].isna().all())
+
+    def test_impute_dataframe_no_nans(self):
+        """Edge case: DataFrame with no missing values."""
+        clean_df = pd.DataFrame({"timestamp": [1.0, 2.0, 3.0], "signal": [10.0, 20.0, 30.0]})
+        result_df, _ = impute_dataframe(
+            clean_df,
+            time_col="timestamp",
+            log_path=self.test_log,
+            history_dir=self.test_history
+        )
+        pd.testing.assert_frame_equal(clean_df, result_df)
+
+    def test_impute_dataframe_missing_time_col(self):
+        """Edge case: specified time column does not exist."""
+        with self.assertRaises((KeyError, ValueError)):
+            impute_dataframe(self.df, time_col="nonexistent")
+
+    def test_impute_dataframe_non_numeric_index(self):
+        """Edge case: specified time column is not numeric / index is not numeric."""
+        bad_df = pd.DataFrame({"signal": [1.0, 2.0]}, index=["a", "b"])
+        with self.assertRaises(TypeError):
+            impute_dataframe(bad_df)
 
     def test_tracker_logging(self):
         tracker = TransformationTracker(log_path=self.test_log, history_dir=self.test_history)
@@ -119,15 +161,18 @@ class TestAgentNativeLayer(unittest.TestCase):
         if os.path.exists(save_img):
             os.remove(save_img)
             
-        plot_diagnostics(
-            original_df=self.df,
-            infilled_df=infilled_df,
-            diagnostics=diagnostics,
-            time_col="timestamp",
-            save_path=save_img,
-            show_plot=False
-        )
-        
-        # Verify the plot image was successfully created on disk
-        self.assertTrue(os.path.exists(save_img))
-        os.remove(save_img)
+        try:
+            plot_diagnostics(
+                original_df=self.df,
+                infilled_df=infilled_df,
+                diagnostics=diagnostics,
+                time_col="timestamp",
+                save_path=save_img,
+                show_plot=False
+            )
+            
+            # Verify the plot image was successfully created on disk
+            self.assertTrue(os.path.exists(save_img))
+        finally:
+            if os.path.exists(save_img):
+                os.remove(save_img)

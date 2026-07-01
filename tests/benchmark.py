@@ -45,12 +45,16 @@ def generate_benchmark_data(n_samples: int = 200, n_channels: int = 3, missing_r
     mask = np.random.rand(n_samples, n_channels) < missing_rate
     masked_data[mask] = np.nan
     
-    # Ensure first and last values are not NaN to prevent interpolation extrapolation issues
+    # Ensure first and last values are not NaN using only masked data (no ground-truth leak!)
     for c in range(n_channels):
-        if np.isnan(masked_data[0, c]):
-            masked_data[0, c] = ground_truth[0, c]
-        if np.isnan(masked_data[-1, c]):
-            masked_data[-1, c] = ground_truth[-1, c]
+        col = masked_data[:, c]
+        valid_idx = np.where(~np.isnan(col))[0]
+        if len(valid_idx) == 0:
+            continue  # can't fill, leave as NaN
+        if np.isnan(col[0]):
+            col[0] = col[valid_idx[0]]
+        if np.isnan(col[-1]):
+            col[-1] = col[valid_idx[-1]]
             
     df_truth = pd.DataFrame(ground_truth, index=timestamps, columns=[f"ch_{i}" for i in range(n_channels)])
     df_masked = pd.DataFrame(masked_data, index=timestamps, columns=[f"ch_{i}" for i in range(n_channels)])
@@ -68,7 +72,7 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
     # 1. NUFI Imputer (Our Library)
     # ==========================================
     start = time.time()
-    nufi = NufiImputer(device='cpu', covariance_compensation=True, n_frequencies='auto', alpha='auto')
+    nufi = NufiImputer(device='cpu', covariance_compensation=True, n_frequencies='auto', alpha='auto', random_state=42)
     try:
         nufi_infilled = nufi.fit_transform(df_masked, timestamps=timestamps)
         nufi_time = time.time() - start
@@ -81,7 +85,7 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
             "Covariance Error (Frobenius)": float(nufi_cov_err),
             "Runtime (s)": float(nufi_time)
         }
-    except Exception as e:
+    except (ValueError, RuntimeError, ImportError) as e:
         results["NUFI"] = {"Error": str(e)}
 
     # ==========================================
@@ -90,8 +94,8 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
     start = time.time()
     try:
         spline_infilled = df_masked.interpolate(method='cubic', axis=0)
-        # Fill any remaining NaNs with linear fallback
-        spline_infilled = spline_infilled.interpolate(method='linear', axis=0).ffill().bfill()
+        # Fill any remaining NaNs with linear fallback and backward/forward fill
+        spline_infilled = spline_infilled.interpolate(method='linear', axis=0).fillna(method='ffill').fillna(method='bfill')
         spline_time = time.time() - start
         
         spline_rmse = np.sqrt(np.mean((df_truth.to_numpy() - spline_infilled.to_numpy()) ** 2))
@@ -102,7 +106,7 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
             "Covariance Error (Frobenius)": float(spline_cov_err),
             "Runtime (s)": float(spline_time)
         }
-    except Exception as e:
+    except (ValueError, RuntimeError, ImportError) as e:
         results["Cubic Spline"] = {"Error": str(e)}
 
     # ==========================================
@@ -113,7 +117,6 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
         try:
             # We append timestamps as a feature so MICE understands temporal relation
             combined_masked = np.hstack([timestamps.reshape(-1, 1), df_masked.to_numpy()])
-            combined_truth = np.hstack([timestamps.reshape(-1, 1), df_truth.to_numpy()])
             
             mice = IterativeImputer(max_iter=10, random_state=42)
             mice_infilled_combined = mice.fit_transform(combined_masked)
@@ -129,7 +132,7 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
                 "Covariance Error (Frobenius)": float(mice_cov_err),
                 "Runtime (s)": float(mice_time)
             }
-        except Exception as e:
+        except (ValueError, RuntimeError, ImportError) as e:
             results["MICE"] = {"Error": str(e)}
     else:
         results["MICE"] = {"Status": "Not Available (Scikit-Learn experimental features missing)"}
@@ -159,7 +162,7 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
                 "Covariance Error (Frobenius)": float(gp_cov_err),
                 "Runtime (s)": float(gp_time)
             }
-        except Exception as e:
+        except (ValueError, RuntimeError, ImportError) as e:
             results["Gaussian Process"] = {"Error": str(e)}
     else:
         results["Gaussian Process"] = {"Status": "Not Available (Scikit-Learn missing)"}

@@ -19,10 +19,20 @@ def test_derivative_continuity():
     dx = np.diff(infilled)
     ddx = np.diff(dx)
     
-    # Check that there are no extreme, discontinuous jumps in the first & second derivatives
-    # Linear interpolation would show a sharp jump at the boundary, but Fourier is completely smooth
-    assert np.max(np.abs(dx)) < 1.0  # smooth derivative bounds
-    assert np.max(np.abs(ddx)) < 0.5 # smooth second derivative bounds
+    # Task 23: Tighten derivative thresholds to more realistic bounds
+    assert np.max(np.abs(dx)) < 0.2   # tight bound: ~2× the expected max (0.101)
+    assert np.max(np.abs(ddx)) < 0.02  # tight bound: ~2× the expected max (0.0102)
+
+    # Task 24: Baseline comparison with linear interpolation
+    from scipy.interpolate import interp1d
+    valid = ~np.isnan(signal)
+    linear_fill = interp1d(t[valid], signal[valid], kind='linear', fill_value='extrapolate')(t)
+    lin_dx = np.diff(linear_fill)
+    lin_ddx = np.diff(lin_dx)
+    
+    # Fourier must be smoother (have smaller or equal max derivative spikes) than linear
+    assert np.max(np.abs(dx)) <= np.max(np.abs(lin_dx)) * 1.01
+    assert np.max(np.abs(ddx)) < np.max(np.abs(lin_ddx))
 
 def test_covariance_preservation():
     # Verify that multi-signal covariance is maintained after imputation
@@ -46,5 +56,5 @@ def test_covariance_preservation():
     
     filled_cov = np.cov(X_filled[:, 0], X_filled[:, 1])
     
-    # The filled covariance should be very close to the original covariance structure
-    np.testing.assert_allclose(filled_cov, original_cov, rtol=1e-1, atol=1e-1)
+    # Task 23: Tighten covariance preservation thresholds to rtol=1e-2, atol=1e-2
+    np.testing.assert_allclose(filled_cov, original_cov, rtol=1e-2, atol=1e-2)

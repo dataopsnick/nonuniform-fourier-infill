@@ -18,7 +18,7 @@ class NufiImputer(BaseEstimator, TransformerMixin):
     stochastic multiple imputation, and GCV auto-tuning.
     """
     def __init__(self, method='direct', device=None, covariance_compensation=True, 
-                 n_frequencies=None, alpha=1e-4, solver='direct', max_iter=100, tol=1e-5):
+                 n_frequencies=None, alpha=1e-4, solver='direct', max_iter=100, tol=1e-5, random_state=None):
         self.method = method
         self.device = device
         self.covariance_compensation = covariance_compensation
@@ -27,6 +27,7 @@ class NufiImputer(BaseEstimator, TransformerMixin):
         self.solver = solver
         self.max_iter = max_iter
         self.tol = tol
+        self.random_state = random_state
         self.lu_ = None
         self.d_ = None
         self.perm_ = None
@@ -93,18 +94,24 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                 exponent = 2.0j * np.pi * t_timestamps.unsqueeze(1) * t_f_k.unsqueeze(0)
                 A = torch.exp(exponent)
                 
-                if self.alpha == 'auto':
-                    candidate_alphas = [1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0]
-                    opt_alpha = optimize_alpha_gcv(A, t_data, candidate_alphas)
-                else:
-                    opt_alpha = self.alpha if self.alpha is not None else 1e-4
-                
-                # Compute GCV score
-                U, S, Vh = torch.linalg.svd(A, full_matrices=False)
-                y_complex = t_data.to(torch.complex128)
-                y_tilde = torch.matmul(U.adjoint(), y_complex)
-                y_norm_sq = torch.sum(torch.abs(y_complex) ** 2)
-                score = compute_gcv_from_svd(S, y_tilde, y_norm_sq, opt_alpha, N_val)
+                try:
+                    if self.alpha == 'auto':
+                        candidate_alphas = [1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 1.0, 10.0]
+                        opt_alpha, U, S, y_tilde, y_norm_sq = optimize_alpha_gcv(
+                            A, t_data, candidate_alphas, return_svd=True
+                        )
+                    else:
+                        opt_alpha = self.alpha if self.alpha is not None else 1e-4
+                        U, S, Vh = torch.linalg.svd(A, full_matrices=False)
+                        y_complex = t_data.to(torch.complex128)
+                        y_tilde = torch.matmul(U.adjoint(), y_complex)
+                        y_norm_sq = torch.sum(torch.abs(y_complex) ** 2)
+                    
+                    score = compute_gcv_from_svd(S, y_tilde, y_norm_sq, opt_alpha, N_val)
+                except RuntimeError as e:
+                    import warnings
+                    warnings.warn(f"SVD failed for column {col_idx}, n_f={n_f}: {e}. Skipping candidate.")
+                    continue
                 
                 if score < best_gcv:
                     best_gcv = score
@@ -114,14 +121,39 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             self.alphas_.append(best_alpha)
             self.n_frequencies_.append(best_n_freq)
             
-        # Build X_list of DatasetObj for covariance computation
+        # Build X_list of DatasetObj for covariance computation (excluding all-NaN columns)
+        valid_cols = []
         X_list = []
         for col_idx in range(X_data.shape[1]):
-            X_list.append(DatasetObj(self.timestamps_, X_data[:, col_idx]))
+            col_data = X_data[:, col_idx]
+            valid_mask = ~np.isnan(col_data) & ~np.isnan(self.timestamps_)
+            if np.any(valid_mask):
+                X_list.append(DatasetObj(self.timestamps_, col_data))
+                valid_cols.append(col_idx)
+            else:
+                import warnings
+                warnings.warn(f"Column {col_idx} is all NaN or has no valid timestamps, skipping from covariance compensation.")
             
         # If covariance compensation is requested, compute LDL^T
         if self.covariance_compensation:
-            self.lu_, self.d_, self.perm_ = covariance_compensation(X_list, device=self.device)
+            n_cols = X_data.shape[1]
+            if len(X_list) > 0:
+                lu_small, d_small, perm_small = covariance_compensation(X_list, device=self.device)
+                
+                # Expand to full size
+                self.lu_ = np.eye(n_cols)
+                self.d_ = np.eye(n_cols)
+                self.perm_ = np.arange(n_cols)
+                
+                # Map small matrices back to full size
+                for i, c_i in enumerate(valid_cols):
+                    for j, c_j in enumerate(valid_cols):
+                        self.lu_[c_i, c_j] = lu_small[i, j]
+                        self.d_[c_i, c_j] = d_small[i, j]
+            else:
+                self.lu_ = np.eye(n_cols)
+                self.d_ = np.eye(n_cols)
+                self.perm_ = np.arange(n_cols)
             
         return self
 
@@ -180,7 +212,9 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             reconstructed = torch.real(torch.sum(F.unsqueeze(0) * torch.exp(exponent), dim=1))
             reconstructed_np = reconstructed.cpu().numpy()
             
+            reconstructed_raw = reconstructed_np.copy()
             # If covariance compensation is computed, align the reconstructed scale
+            cov_scale = 1.0
             if self.covariance_compensation and self.d_ is not None:
                 cov_scale = np.sqrt(np.abs(np.diag(self.d_)[col_idx]))
                 if cov_scale > 0:
@@ -193,7 +227,8 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                     # Compute residual standard deviation on observed values
                     obs_mask = ~nan_mask
                     if np.any(obs_mask):
-                        residual = X_data[obs_mask, col_idx] - reconstructed_np[obs_mask]
+                        # Use unscaled reconstruction so both terms are in the same space
+                        residual = X_data[obs_mask, col_idx] - reconstructed_raw[obs_mask]
                         residual_std = np.std(residual) if len(residual) > 1 else 0.1
                         if np.isnan(residual_std) or residual_std == 0:
                             residual_std = 0.1
@@ -201,12 +236,11 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                         residual_std = 0.1
                         
                     # Generate noise from posterior process scaled by uncertainty parameters
-                    noise = np.random.normal(0, stochastic_scale * residual_std, size=nan_mask.sum())
+                    rng = np.random.RandomState(self.random_state) if self.random_state is not None else np.random
+                    noise = rng.normal(0, stochastic_scale * residual_std, size=nan_mask.sum())
                     
-                    if self.covariance_compensation and self.d_ is not None:
-                        cov_scale = np.sqrt(np.abs(np.diag(self.d_)[col_idx]))
-                        if cov_scale > 0:
-                            noise = noise * cov_scale
+                    if self.covariance_compensation and self.d_ is not None and cov_scale > 0:
+                        noise = noise * cov_scale
                     
                     X_data[nan_mask, col_idx] = reconstructed_np[nan_mask] + noise
                 else:

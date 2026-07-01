@@ -1,6 +1,9 @@
 import os
 import time
 import json
+import uuid
+import threading
+import torch
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -16,32 +19,40 @@ class TransformationTracker:
     Manages append-only transformation logging and snapshot-based dataframe version tracking.
     Saves snapshots under '.nufi_history/' and logs actions to 'nufi_transformations.log'.
     """
+    _lock = threading.Lock()
+
     def __init__(self, log_path: str = "nufi_transformations.log", history_dir: str = ".nufi_history"):
-        self.log_path = log_path
-        self.history_dir = history_dir
-        try:
-            os.makedirs(self.history_dir, exist_ok=True)
-        except Exception as e:
-            raise TransformationLoggingError(f"Failed to create history directory: {e}")
+        if ".." in os.path.normpath(log_path) or ".." in os.path.normpath(history_dir):
+            raise ValueError("Path traversal detected in log_path or history_dir.")
+        self.log_path = os.path.abspath(log_path)
+        self.history_dir = os.path.abspath(history_dir)
+        
+        with self._lock:
+            try:
+                os.makedirs(self.history_dir, exist_ok=True)
+            except Exception as e:
+                raise TransformationLoggingError(f"Failed to create history directory: {e}")
 
     def log_transformation(self, log_entry: dict):
         """Appends a transformation log entry to the log file in append-only mode."""
-        try:
-            with open(self.log_path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(log_entry) + "\n")
-        except Exception as e:
-            raise TransformationLoggingError(f"Failed to write to transformation log: {e}")
+        with self._lock:
+            try:
+                with open(self.log_path, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(log_entry) + "\n")
+            except Exception as e:
+                raise TransformationLoggingError(f"Failed to write to transformation log: {e}")
 
     def save_snapshot(self, df: pd.DataFrame, step_name: str) -> str:
         """Saves a dataframe snapshot with timestamp and unique version ID."""
-        version_id = f"ver_{int(time.time() * 1000)}"
+        version_id = f"ver_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
         filename = f"{version_id}_{step_name}.csv"
         filepath = os.path.join(self.history_dir, filename)
         
-        try:
-            df.to_csv(filepath, index=True)
-        except Exception as e:
-            raise TransformationLoggingError(f"Failed to save data snapshot {filepath}: {e}")
+        with self._lock:
+            try:
+                df.to_csv(filepath, index=True)
+            except Exception as e:
+                raise TransformationLoggingError(f"Failed to save data snapshot {filepath}: {e}")
             
         log_entry = {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -57,29 +68,33 @@ class TransformationTracker:
 
     def list_versions(self) -> list:
         """Lists all saved versions chronologically."""
-        if not os.path.exists(self.history_dir):
-            return []
-        try:
-            files = [f for f in os.listdir(self.history_dir) if f.endswith(".csv")]
-            files.sort()  # Chronological order because of time-based ID prefix
-            versions = []
-            for f in files:
-                parts = f.split("_")
-                if len(parts) >= 3:
-                    version_id = f"{parts[0]}_{parts[1]}"
-                    step_name = "_".join(parts[2:]).replace(".csv", "")
-                else:
-                    version_id = parts[0]
-                    step_name = parts[1].replace(".csv", "")
-                versions.append({
-                    "version_id": version_id,
-                    "step_name": step_name,
-                    "filename": f,
-                    "filepath": os.path.join(self.history_dir, f)
-                })
-            return versions
-        except Exception as e:
-            raise TransformationLoggingError(f"Failed to list history directory: {e}")
+        with self._lock:
+            if not os.path.exists(self.history_dir):
+                return []
+            try:
+                files = [f for f in os.listdir(self.history_dir) if f.endswith(".csv")]
+                files.sort()  # Chronological order because of time-based ID prefix
+                versions = []
+                for f in files:
+                    parts = f.split("_")
+                    if len(parts) >= 4:
+                        version_id = f"{parts[0]}_{parts[1]}_{parts[2]}"
+                        step_name = "_".join(parts[3:]).replace(".csv", "")
+                    elif len(parts) == 3:
+                        version_id = f"{parts[0]}_{parts[1]}"
+                        step_name = parts[2].replace(".csv", "")
+                    else:
+                        version_id = parts[0]
+                        step_name = parts[1].replace(".csv", "")
+                    versions.append({
+                        "version_id": version_id,
+                        "step_name": step_name,
+                        "filename": f,
+                        "filepath": os.path.join(self.history_dir, f)
+                    })
+                return versions
+            except Exception as e:
+                raise TransformationLoggingError(f"Failed to list history directory: {e}")
 
     def revert_to_version(self, version_id: str) -> pd.DataFrame:
         """Loads and returns a saved dataframe snapshot of the specified version_id."""
@@ -93,7 +108,8 @@ class TransformationTracker:
             raise ValueError(f"Version ID '{version_id}' not found in transformation history.")
             
         try:
-            df = pd.read_csv(target["filepath"], index_col=0)
+            with self._lock:
+                df = pd.read_csv(target["filepath"], index_col=0)
             
             # Log the reversion
             log_entry = {
@@ -174,6 +190,12 @@ def impute_dataframe(
     df_copy = df.copy()
     if time_col is not None:
         df_copy = df_copy.set_index(time_col)
+
+    if not pd.api.types.is_numeric_dtype(df_copy.index):
+        raise TypeError(
+            f"DataFrame index must be numeric (timestamps). "
+            f"Got dtype={df_copy.index.dtype}. Provide a numeric time column via `time_col`."
+        )
 
     timestamps = df_copy.index.to_numpy(dtype=np.float64)
 
@@ -321,7 +343,11 @@ def plot_diagnostics(
     time_col: str = None,
     columns: list = None,
     save_path: str = None,
-    show_plot: bool = True
+    show_plot: bool = True,
+    solver: str = 'direct',
+    max_iter: int = 100,
+    tol: float = 1e-5,
+    device: str = None
 ):
     """
     Generates an interactive, publication-ready visualization of the infilling results.
@@ -333,6 +359,12 @@ def plot_diagnostics(
     if time_col is not None:
         orig_copy = orig_copy.set_index(time_col)
         inf_copy = inf_copy.set_index(time_col)
+
+    if not pd.api.types.is_numeric_dtype(orig_copy.index):
+        raise TypeError(
+            f"DataFrame index must be numeric (timestamps). "
+            f"Got dtype={orig_copy.index.dtype}. Provide a numeric time column via `time_col`."
+        )
 
     timestamps = orig_copy.index.to_numpy(dtype=np.float64)
 
@@ -376,7 +408,7 @@ def plot_diagnostics(
         if len(v_data) > 0:
             F = solve_tikhonov_nudft(
                 v_timestamps, v_data, f_k, opt_alpha,
-                solver='direct', max_iter=100, tol=1e-5, device=None
+                solver=solver, max_iter=max_iter, tol=tol, device=device
             )
             F_np = F.cpu().numpy()
             psd = np.abs(F_np) ** 2

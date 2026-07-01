@@ -1,29 +1,97 @@
 import os
 import sys
-from setuptools import setup, Extension
-from Cython.Build import cythonize
-import numpy as np
+
+# Task 8: Check for build-time dependencies
+try:
+    from setuptools import setup, Extension
+except ImportError:
+    raise ImportError(
+        "Setuptools is required to build this package. "
+        "Install it via: pip install setuptools"
+    )
+
+try:
+    from Cython.Build import cythonize
+except ImportError:
+    raise ImportError(
+        "Cython is required to build this package. "
+        "Install it via: pip install cython>=3.0.0"
+    )
+
+try:
+    import numpy as np
+except ImportError:
+    raise ImportError(
+        "NumPy is required to build this package. "
+        "Install it via: pip install numpy>=1.20.0"
+    )
 
 # Determine compiler flags for OpenMP (multi-threading support)
 ext_compiler_args = []
 ext_linker_args = []
+ext_include_dirs = [np.get_include()]
 
-if sys.platform == "win32":
-    ext_compiler_args = ["/openmp"]
-elif sys.platform == "darwin":
-    # On macOS, standard clang doesn't support -fopenmp without extra config.
-    # We will try compiling without OpenMP, or user can set brew paths.
+if os.environ.get("NUIFI_NO_OPENMP"):
     ext_compiler_args = []
+    ext_linker_args = []
 else:
-    # Linux (GCC)
-    ext_compiler_args = ["-fopenmp"]
-    ext_linker_args = ["-fopenmp"]
+    if sys.platform == "win32":
+        ext_compiler_args = ["/openmp"]
+    elif sys.platform == "darwin":
+        # On macOS, standard clang doesn't support -fopenmp without extra config.
+        # Try to detect Homebrew libomp; fall back to no OpenMP with a warning.
+        libomp_candidates = [
+            "/opt/homebrew/opt/libomp",   # Apple Silicon Homebrew
+            "/usr/local/opt/libomp",       # Intel Homebrew
+        ]
+        libomp_path = None
+        for candidate in libomp_candidates:
+            if os.path.isdir(candidate):
+                libomp_path = candidate
+                break
+        if libomp_path:
+            ext_compiler_args = ["-Xpreprocessor", "-fopenmp"]
+            ext_linker_args = ["-L" + os.path.join(libomp_path, "lib"), "-lomp"]
+            ext_include_dirs.append(os.path.join(libomp_path, "include"))
+        else:
+            print("WARNING: OpenMP not found. Install libomp via 'brew install libomp' for better performance.")
+            ext_compiler_args = []
+            ext_linker_args = []
+    else:
+        # Linux, BSD, or other systems. Let's check compiler support for -fopenmp.
+        import subprocess
+        import tempfile
+        import shutil
+
+        has_openmp = False
+        tmpdir = tempfile.mkdtemp()
+        try:
+            test_file = os.path.join(tmpdir, "test.c")
+            with open(test_file, "w") as f:
+                f.write("#include <omp.h>\nint main(void) { return omp_get_num_threads(); }\n")
+            cc = os.environ.get("CC", "cc")
+            cmd = [cc, "-fopenmp", test_file, "-o", os.path.join(tmpdir, "test")]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            if res.returncode == 0:
+                has_openmp = True
+        except Exception:
+            pass
+        finally:
+            shutil.rmtree(tmpdir)
+
+        if has_openmp:
+            ext_compiler_args = ["-fopenmp"]
+            ext_linker_args = ["-fopenmp"]
+        else:
+            print("WARNING: OpenMP not supported by compiler, disabling.")
+            ext_compiler_args = []
+            ext_linker_args = []
 
 extensions = [
     Extension(
         "nufi.kernels.cy_kernels",
         sources=["nufi/kernels/cy_kernels.pyx"],
-        include_dirs=[np.get_include()],
+        include_dirs=ext_include_dirs,
         extra_compile_args=ext_compiler_args,
         extra_link_args=ext_linker_args,
     )

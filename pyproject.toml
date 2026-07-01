@@ -1,11 +1,11 @@
 [build-system]
-requires = ["setuptools>=61.0.0", "wheel", "Cython>=3.0.0", "numpy>=1.20.0"]
+requires = ["setuptools>=61.0.0", "wheel", "Cython>=3.0.0", "oldest-supported-numpy"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "nufi"
 version = "0.1.0"
-description = "A high-performance, GPU-accelerated non-uniform Fourier infilling library"
+description = "A high-performance, GPU-accelerated non-uniform Fourier infilling library. Note: For GPU acceleration, a CUDA-capable or MPS-capable PyTorch must be installed separately."
 readme = "README.md"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -17,5 +17,11 @@ dependencies = [
     "torch>=2.0.0"
 ]
 
+[project.optional-dependencies]
+gpu = ["torch>=2.0.0"]
+
 [tool.setuptools]
-packages = ["nufi", "nufi.kernels"]
+packages = ["find:auto"]
+
+[tool.setuptools.packages.find]
+include = ["nufi*"]
