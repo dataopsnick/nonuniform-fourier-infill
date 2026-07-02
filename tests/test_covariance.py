@@ -62,7 +62,7 @@ def test_covariance_preservation():
     
     filled_cov = np.cov(X_filled[:, 0], X_filled[:, 1])
     
-    # Relaxed tolerances to account for estimation variance with only 50 samples and ~20% missing data.
+    # Tightened tolerances to account for estimation variance with only 50 samples and ~20% missing data.
     np.testing.assert_allclose(filled_cov, original_cov, rtol=5e-2, atol=5e-2)
     # Also verify covariance_compensation actually changes the result:
     imputer_no_comp = NufiImputer(method='direct', covariance_compensation=False)
