@@ -149,8 +149,11 @@ class TransformationTracker:
                 try:
                     self.log_transformation(log_entry)
                 except TransformationLoggingError:
-                    # Log failure is non-fatal; the reverted DataFrame is still valid.
-                    pass
+                    import warnings
+                    warnings.warn(
+                        f"Failed to log reversion to {version_id}; audit trail may be incomplete.",
+                        UserWarning
+                    )
                 return df
             except Exception as e:
                 raise TransformationLoggingError(f"Failed to load or log reverted version {version_id}: {e}")
@@ -296,21 +299,24 @@ def impute_dataframe(
         imputer.fit(df_copy, timestamps=timestamps)
         infilled_df = imputer.transform(df_copy, timestamps=timestamps, stochastic=stochastic, stochastic_scale=stochastic_scale)
     except Exception:
-        tracker.log_transformation({
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "event": "infilled_dataframe_failed",
-            "pre_infill_version": pre_ver,
-            "parameters": {
-                "method": method,
-                "device": str(device),
-                "n_frequencies": n_frequencies,
-                "alpha": alpha,
-                "solver": solver,
-                "covariance_compensation": covariance_compensation,
-                "stochastic": stochastic,
-                "stochastic_scale": stochastic_scale
-            }
-        })
+        try:
+            tracker.log_transformation({
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "event": "infilled_dataframe_failed",
+                "pre_infill_version": pre_ver,
+                "parameters": {
+                    "method": method,
+                    "device": str(device),
+                    "n_frequencies": n_frequencies,
+                    "alpha": alpha,
+                    "solver": solver,
+                    "covariance_compensation": covariance_compensation,
+                    "stochastic": stochastic,
+                    "stochastic_scale": stochastic_scale
+                }
+            })
+        except Exception:
+            pass  # do not mask the original exception
         raise
 
     # Restore the epoch after transform to map back to original unshifted index
@@ -357,8 +363,9 @@ def impute_dataframe(
                 sort_idx = np.argsort(v_timestamps)
                 v_timestamps = v_timestamps[sort_idx]
                 v_data = v_data[sort_idx]
-        p_n = np.diff(v_timestamps) if len(v_timestamps) > 1 else [1.0]
-        min_p = np.min(p_n[p_n > 0]) if (isinstance(p_n, np.ndarray) and np.any(p_n > 0)) or (isinstance(p_n, list) and any(x > 0 for x in p_n)) else 1.0
+        p_n = np.diff(v_timestamps) if len(v_timestamps) > 1 else np.array([1.0])
+        pos_mask = p_n > 0
+        min_p = np.min(p_n[pos_mask]) if np.any(pos_mask) else 1.0
         max_sampling_rate = 1.0 / min_p
         nyquist_frequency = max_sampling_rate / 2.0
         f_k = np.linspace(0, nyquist_frequency, n_f)

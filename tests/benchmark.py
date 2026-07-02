@@ -55,7 +55,7 @@ def generate_benchmark_data(n_samples: int = 200, n_channels: int = 3, missing_r
     
     return timestamps, df_truth, df_masked
 
-def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: float = 0.3) -> dict:
+def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: float = 0.3, gp_max_valid: int = 500) -> dict:
     """Runs empirical comparison of NUFI, MICE, GPs, and Splines."""
     timestamps, df_truth, df_masked = generate_benchmark_data(n_samples, n_channels, missing_rate)
     
@@ -155,7 +155,7 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
         start = time.time()
         try:
             n_valid_max = max((~np.isnan(df_masked.to_numpy()[:, c])).sum() for c in range(n_channels))
-            if n_valid_max > 500:
+            if n_valid_max > gp_max_valid:
                 results["Gaussian Process"] = {"Status": f"Skipped: too many valid points ({n_valid_max}) for O(n³) GP"}
             else:
                 gp_infilled_data = np.zeros_like(df_truth.to_numpy())
@@ -164,8 +164,8 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
                     valid = ~np.isnan(col_data)
                     n_valid = valid.sum()
                     if n_valid < 2:
-                        # Not enough observations to fit a GP; fill with column mean or NaN
-                        gp_infilled_data[:, c] = np.nanmean(col_data) if n_valid > 0 else 0.0
+                        # Not enough observations to fit a GP; fill with NaN to avoid biased scores
+                        gp_infilled_data[:, c] = np.nan if n_valid == 0 else np.nanmean(col_data)
                         continue
                     
                     gp = GaussianProcessRegressor(
@@ -178,18 +178,18 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
                     gp_infilled_data[:, c] = gp.predict(timestamps.reshape(-1, 1))
                     
                 gp_time = time.time() - start
-            gp_rmse = np.sqrt(np.mean((df_truth.to_numpy() - gp_infilled_data) ** 2))
-            gp_infilled_df = pd.DataFrame(gp_infilled_data, columns=df_truth.columns)
-            try:
-                gp_cov_err = np.linalg.norm(true_cov - gp_infilled_df.cov().to_numpy(), ord='fro')
-            except (ValueError, np.linalg.LinAlgError):
-                gp_cov_err = float('nan')
-            
-            results["Gaussian Process"] = {
-                "RMSE": float(gp_rmse),
-                "Covariance Error (Frobenius)": float(gp_cov_err),
-                "Runtime (s)": float(gp_time)
-            }
+                gp_rmse = np.sqrt(np.mean((df_truth.to_numpy() - gp_infilled_data) ** 2))
+                gp_infilled_df = pd.DataFrame(gp_infilled_data, columns=df_truth.columns)
+                try:
+                    gp_cov_err = np.linalg.norm(true_cov - gp_infilled_df.cov().to_numpy(), ord='fro')
+                except (ValueError, np.linalg.LinAlgError):
+                    gp_cov_err = float('nan')
+                
+                results["Gaussian Process"] = {
+                    "RMSE": float(gp_rmse),
+                    "Covariance Error (Frobenius)": float(gp_cov_err),
+                    "Runtime (s)": float(gp_time)
+                }
         except (ValueError, RuntimeError, ImportError) as e:
             results["Gaussian Process"] = {"Error": str(e)}
     else:

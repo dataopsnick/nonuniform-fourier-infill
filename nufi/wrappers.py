@@ -43,6 +43,11 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False, sort=
         pd_df = df.to_pandas()
     else:
         pd_df = df.copy()
+
+    if time_col is not None and time_col not in pd_df.columns:
+        raise ValueError(
+            f"time_col '{time_col}' not found in DataFrame columns: {list(pd_df.columns)}"
+        )
         
     if imputer is None:
         imputer = NufiImputer()
@@ -50,20 +55,12 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False, sort=
     # Sort by time to ensure proper chronological order for frequency estimation
     if sort:
         if time_col is not None:
-            if time_col not in pd_df.columns:
-                raise ValueError(
-                    f"time_col '{time_col}' not found in DataFrame columns: {list(pd_df.columns)}"
-                )
             pd_df = pd_df.sort_values(time_col)
         else:
             pd_df = pd_df.sort_index()
 
     # If a specific column is defined as time, set it as index
     if time_col is not None:
-        if time_col not in pd_df.columns:
-            raise ValueError(
-                f"time_col '{time_col}' not found in DataFrame columns: {list(pd_df.columns)}"
-            )
         # Capture the original index name before replacement and warn if discarded
         previous_index_name = pd_df.index.name
         if previous_index_name is not None:
@@ -104,7 +101,7 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False, sort=
         )
     
     # Verify row order before continuing
-    if not np.array_equal(infilled_pd.index, pd_df.index):
+    if not infilled_pd.index.equals(pd_df.index):
         raise ValueError(
             "NufiImputer.fit_transform reordered rows. "
             "Row order must be preserved."
@@ -225,7 +222,7 @@ def infill_multiindex_dataframe(df, imputer=None, entity_level=0, time_level=1, 
             )
         
         # Verify row order before restoring index
-        if not np.array_equal(infilled_temp.index, temp_df.index):
+        if not infilled_temp.index.equals(temp_df.index):
             raise ValueError(
                 "NufiImputer.fit_transform reordered rows. "
                 "Row order must be preserved for correct index restoration."
