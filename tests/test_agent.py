@@ -80,6 +80,11 @@ class TestAgentNativeLayer(unittest.TestCase):
             history_dir=self.test_history
         )
         self.assertTrue(result_df["signal"].isna().all())
+        # Verify timestamp column is preserved unchanged
+        np.testing.assert_array_equal(
+            result_df["timestamp"].values,
+            all_nan_df["timestamp"].values
+        )
         self.assertIn("signal", diagnostics)
         col_diag = diagnostics["signal"]
         self.assertIn("stability_flags", col_diag)
@@ -162,10 +167,27 @@ class TestAgentNativeLayer(unittest.TestCase):
             "revert_to_version returned the mutated dataframe instead of the original snapshot"
         )
 
+    def test_tracker_revert_to_version_invalid_id(self):
+        """Edge case: revert_to_version with non-existent ID should raise an error."""
+        tracker = TransformationTracker(log_path=self.test_log, history_dir=self.test_history)
+        with self.assertRaises((KeyError, FileNotFoundError, ValueError)):
+            tracker.revert_to_version("nonexistent_id_12345")
+
+    def test_tracker_revert_to_version_malformed_id(self):
+        """Edge case: revert_to_version with empty or wrong-type IDs."""
+        tracker = TransformationTracker(log_path=self.test_log, history_dir=self.test_history)
+        for bad_id in ["", 42, None]:
+            with self.subTest(bad_id=bad_id):
+                with self.assertRaises((KeyError, FileNotFoundError, TypeError, ValueError)):
+                    tracker.revert_to_version(bad_id)
+
     def test_agent_plot_diagnostics(self):
         # Ensure non-interactive backend for headless CI environments
-        import matplotlib
-        matplotlib.use('Agg')
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+        except ImportError:
+            self.skipTest("matplotlib not available")
         
         # Run infilling
         infilled_df, diagnostics = impute_dataframe(
@@ -195,3 +217,34 @@ class TestAgentNativeLayer(unittest.TestCase):
         finally:
             if os.path.exists(save_img):
                 os.remove(save_img)
+
+    def test_plot_diagnostics_bad_input(self):
+        """Edge case: plot_diagnostics with malformed diagnostics dict."""
+        try:
+            import matplotlib
+            matplotlib.use('Agg')
+        except ImportError:
+            self.skipTest("matplotlib not available")
+        clean_df = pd.DataFrame({"timestamp": [1.0, 2.0], "signal": [10.0, 20.0]})
+        save_img = os.path.join(self._tmpdir, "bad_diag_plot.png")
+        bad_diagnostics_cases = [
+            {},                                    # empty dict
+            {"signal": {}},                        # missing all expected keys
+            {"signal": {"snr_db": "not_a_number"}}, # wrong type
+            {"signal": None},                      # None column diag
+        ]
+        for bad_diag in bad_diagnostics_cases:
+            with self.subTest(bad_diag=bad_diag):
+                try:
+                     plot_diagnostics(
+                         original_df=clean_df,
+                         infilled_df=clean_df,
+                         diagnostics=bad_diag,
+                         time_col="timestamp",
+                         save_path=save_img,
+                         show_plot=False
+                     )
+                except (KeyError, TypeError, ValueError):
+                     pass  # expected for truly malformed input
+        if os.path.exists(save_img):
+            os.remove(save_img)

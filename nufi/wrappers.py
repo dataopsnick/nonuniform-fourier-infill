@@ -102,6 +102,30 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False, sort=
             pd_df = pd_df.set_index(time_col)
             pd_df.index.name = None
         
+    # Validate timestamp integrity (parity with multiindex wrapper)
+    timestamps = pd_df.index.values
+    try:
+        np.array(timestamps, dtype=np.float64)
+    except (TypeError, ValueError):
+        raise TypeError(
+            f"Index dtype {pd_df.index.dtype} cannot be converted to float64. "
+            "Use a numeric or datetime64 index."
+        )
+    if len(timestamps) > 1:
+        if np.issubdtype(timestamps.dtype, np.datetime64):
+            if pd.isna(timestamps).any():
+                raise ValueError("Index contains NaT values.")
+            diffs = np.diff(timestamps.view('int64'))
+        else:
+            if np.isnan(timestamps.astype(np.float64)).any():
+                raise ValueError("Index contains NaN values.")
+            diffs = np.diff(timestamps.astype(np.float64))
+        if np.any(diffs <= 0):
+            raise ValueError(
+                "Timestamps must be strictly increasing; "
+                "found non-positive difference."
+            )
+
     infilled_pd = imputer.fit_transform(pd_df)
     
     if len(infilled_pd) != len(pd_df):
@@ -210,14 +234,17 @@ def infill_multiindex_dataframe(df, imputer=None, entity_level=0, time_level=1, 
         if len(timestamps) > 1:
             # Use integer diff on datetime64 to avoid float64 precision loss
             if np.issubdtype(timestamps.dtype, np.datetime64):
+                if pd.isna(timestamps).any():
+                    raise ValueError("Timestamp level contains NaT values.")
                 diffs = np.diff(timestamps.view('int64'))
             else:
+                if np.isnan(timestamps.astype(np.float64)).any():
+                    raise ValueError("Timestamp level contains NaN values.")
                 diffs = np.diff(timestamps.astype(np.float64))
             if np.any(diffs <= 0):
                 raise ValueError(
-                    f"Timestamps for group must be strictly increasing; "
-                    f"found non-positive or zero difference. "
-                    f"Check for duplicate or out-of-order timestamps."
+                    "Timestamps must be strictly increasing; "
+                    "found non-positive difference."
                 )
 
         # Avoid to_numpy() which coerces dtypes; copy with a clean index instead
@@ -263,6 +290,12 @@ def infill_multiindex_dataframe(df, imputer=None, entity_level=0, time_level=1, 
         raise ValueError(
             f"Concatenated result has {len(infilled_pd)} rows, "
             f"expected {len(pd_df)}. Group-level indices may overlap or be non-unique."
+        )
+
+    if not infilled_pd.index.equals(pd_df.index):
+        raise ValueError(
+            "Concatenated result index differs from input index. "
+            "Group-level indices may overlap or be non-unique."
         )
 
     if is_cudf:

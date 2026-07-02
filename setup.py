@@ -6,9 +6,7 @@ import shutil
 import sysconfig
 import warnings
 
-def parse_version(v_str):
-    clean_v = "".join(c if c.isdigit() or c == "." else "" for c in v_str.split("-")[0].split("+")[0])
-    return tuple(map(int, [p for p in clean_v.split(".") if p]))
+from packaging.version import parse as parse_version
 
 # Task 8: Check for build-time dependencies
 try:
@@ -87,13 +85,42 @@ else:
                         libomp_path = candidate
                         break
         if libomp_path:
-            ext_compiler_args = ["-Xpreprocessor", "-fopenmp"]
-            ext_linker_args = [
-                "-L" + os.path.join(libomp_path, "lib"),
-                "-Wl,-rpath," + os.path.join(libomp_path, "lib"),
-                "-lomp",
-            ]
-            ext_include_dirs.append(os.path.join(libomp_path, "include"))
+            # Verify the discovered libomp actually links
+            tmpdir = tempfile.mkdtemp()
+            has_working_libomp = False
+            try:
+                test_file = os.path.join(tmpdir, "test.c")
+                with open(test_file, "w") as f:
+                    f.write("#include <omp.h>\nint main(void) { return omp_get_num_threads(); }\n")
+                cc = os.environ.get("CC") or sysconfig.get_config_var("CC") or "cc"
+                cmd = [
+                    cc, "-Xpreprocessor", "-fopenmp",
+                    "-I" + os.path.join(libomp_path, "include"),
+                    "-L" + os.path.join(libomp_path, "lib"),
+                    "-lomp",
+                    test_file, "-o", os.path.join(tmpdir, "test"),
+                ]
+                res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                if res.returncode == 0:
+                    has_working_libomp = True
+                else:
+                    raise RuntimeError(f"Link test failed: {res.stderr.decode().strip()}")
+            except Exception as e:
+                warnings.warn(f"OpenMP link test failed: {e}. Falling back to no OpenMP.")
+            finally:
+                shutil.rmtree(tmpdir, ignore_errors=True)
+
+            if has_working_libomp:
+                ext_compiler_args = ["-Xpreprocessor", "-fopenmp"]
+                ext_linker_args = [
+                    "-L" + os.path.join(libomp_path, "lib"),
+                    "-Wl,-rpath," + os.path.join(libomp_path, "lib"),
+                    "-lomp",
+                ]
+                ext_include_dirs.append(os.path.join(libomp_path, "include"))
+            else:
+                ext_compiler_args = []
+                ext_linker_args = []
         else:
             warnings.warn(
                 "OpenMP not found. Install libomp via 'brew install libomp' "

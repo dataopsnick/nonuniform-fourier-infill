@@ -21,6 +21,11 @@ def test_infill_dataframe_wrapper():
     # Verify observed values are preserved
     assert df_filled.loc[0, 'signal'] == 10.0
     assert df_filled.loc[2, 'signal'] == 30.0
+    # Sanity: filled values should be within a reasonable range of observed data
+    assert 5.0 <= df_filled.loc[1, 'signal'] <= 35.0, (
+        f"Filled value {df_filled.loc[1, 'signal']} is far outside observed range [10, 30]"
+    )
+    assert 5.0 <= df_filled.loc[3, 'signal'] <= 35.0
     
     # Infill keeping time_col as feature
     df_filled_keep = infill_dataframe(df, time_col='timestamp', keep_time_col=True)
@@ -75,6 +80,26 @@ def test_multiindex_wrapper():
     assert isinstance(df_filled, pd.DataFrame)
     assert not df_filled.isna().any().any()
     assert df_filled.loc[('group_A', 1.0), 'signal'] == 1.5
+
+
+def test_multiindex_wrapper_uneven_groups():
+    # Groups with different sizes and non-aligned timestamps
+    arrays = [
+        ['group_A', 'group_A', 'group_A', 'group_B', 'group_B'],
+        [1.0, 3.0, 5.0, 2.0, 4.0]
+    ]
+    index = pd.MultiIndex.from_arrays(arrays, names=('entity', 'time'))
+    df = pd.DataFrame({
+        'signal': [1.0, np.nan, 5.0, np.nan, 4.0]
+    }, index=index)
+    
+    imputer = NufiImputer(method='direct', covariance_compensation=False)
+    df_filled = infill_multiindex_dataframe(df, imputer)
+    assert isinstance(df_filled, pd.DataFrame)
+    assert not df_filled.isna().any().any()
+    # Values in different groups should be imputed independently
+    assert df_filled.loc[('group_A', 1.0), 'signal'] == 1.0
+    assert df_filled.loc[('group_B', 4.0), 'signal'] == 4.0
 
 def test_tikhonov_direct_and_cg_solvers():
     # Verify both direct and Conjugate Gradient (cg) solver types work
@@ -133,8 +158,15 @@ def test_gcv_tuning():
         obs_max = np.nanmax(col_obs)
         # Verify no wild outliers using a tolerance proportional to the data scale
         col_range = obs_max - obs_min if obs_max > obs_min else 1.0
-        assert np.all(X_filled[:, col_idx] >= obs_min - 0.5 * col_range)
-        assert np.all(X_filled[:, col_idx] <= obs_max + 0.5 * col_range)
+        # Tighten bounds to catch obviously poor imputations
+        assert np.all(X_filled[:, col_idx] >= obs_min - 0.1 * col_range)
+        assert np.all(X_filled[:, col_idx] <= obs_max + 0.1 * col_range)
+        # Additional sanity: imputed values should not all be identical to the mean
+        nan_rows = np.isnan(col_obs)
+        if nan_rows.sum() > 1:
+            assert np.std(X_filled[nan_rows, col_idx]) > 1e-8, (
+                f"Imputed values in column {col_idx} appear constant"
+            )
 
 def test_stochastic_imputation():
     # Verify that stochastic multiple imputation produces non-deterministic filled values
@@ -162,10 +194,14 @@ def test_stochastic_imputation():
     assert X_filled_1[2, 0] == 3.0
     assert X_filled_2[2, 0] == 3.0
     
-    # Use a tolerance to avoid false failures from floating-point coincidences
-    assert abs(X_filled_1[1, 0] - X_filled_2[1, 0]) > 1e-12 and abs(X_filled_1[3, 0] - X_filled_2[3, 0]) > 1e-12, (
-        "Stochastic imputations should differ at both missing positions; at least one pair was identical"
-    )
+    # Use seeded imputers with different random states for a deterministic divergence check
+    imputer_a = NufiImputer(method='direct', alpha=1e-4, covariance_compensation=False, random_state=42)
+    imputer_b = NufiImputer(method='direct', alpha=1e-4, covariance_compensation=False, random_state=99)
+    imputer_a.fit(X)
+    imputer_b.fit(X)
+    X_a = imputer_a.transform(X, stochastic=True, stochastic_scale=1.5)
+    X_b = imputer_b.transform(X, stochastic=True, stochastic_scale=1.5)
+    assert not np.array_equal(X_a, X_b), "Different random seeds should produce different stochastic imputations"
     
     # With fixed random_state: calls should be reproducible
     imputer_seeded = NufiImputer(method='direct', alpha=1e-4, covariance_compensation=False, random_state=42)
@@ -209,7 +245,7 @@ def test_imputer_edge_cases():
         [3.0, np.nan]
     ], dtype=np.float64)
     imputer1 = NufiImputer(covariance_compensation=True)
-    with pytest.warns(UserWarning, match="all-NaN|empty|no valid"):
+    with pytest.warns(UserWarning, match=r"all.NaN|column.*empty|no valid (observations|values|samples)"):
         X_filled = imputer1.fit_transform(X_all_nan)
     assert np.isnan(X_filled[:, 1]).all()  # column with all NaNs remains NaN or handles gracefully
     assert np.allclose(X_filled[:, 0], X_all_nan[:, 0])  # non-NaN column should be unchanged

@@ -99,7 +99,7 @@ venv.bak/
 
 # Local NUFI history and logs
 .nufi_history/
-*.log
+/*.log
 benchmark_results_*.json
 
 # MacOS System File

@@ -72,9 +72,15 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
         nufi_infilled = nufi.fit_transform(df_masked)
         nufi_time = time.time() - start
         
+        if np.any(np.isnan(nufi_infilled.to_numpy())):
+            raise ValueError("Imputation returned NaN values.")
         nufi_rmse = np.sqrt(np.mean((df_truth.to_numpy() - nufi_infilled.to_numpy()) ** 2))
         try:
-            nufi_cov_err = np.linalg.norm(true_cov - nufi_infilled.cov().to_numpy(), ord='fro')
+            cov_diff = true_cov - nufi_infilled.cov().to_numpy()
+            if np.any(np.isnan(cov_diff)):
+                nufi_cov_err = float('nan')
+            else:
+                nufi_cov_err = np.linalg.norm(cov_diff, ord='fro')
         except (ValueError, np.linalg.LinAlgError):
             nufi_cov_err = float('nan')
         
@@ -83,7 +89,7 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
             "Covariance Error (Frobenius)": float(nufi_cov_err),
             "Runtime (s)": float(nufi_time)
         }
-    except (ValueError, RuntimeError, ImportError) as e:
+    except Exception as e:
         import traceback
         print(f"[WARN] NUFI benchmark failed: {e}")
         traceback.print_exc()
@@ -102,9 +108,15 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
             spline_infilled = spline_infilled.interpolate(method='linear', axis=0).ffill().bfill()
         spline_time = time.time() - start
         
+        if np.any(np.isnan(spline_infilled.to_numpy())):
+            raise ValueError("Imputation returned NaN values.")
         spline_rmse = np.sqrt(np.mean((df_truth.to_numpy() - spline_infilled.to_numpy()) ** 2))
         try:
-            spline_cov_err = np.linalg.norm(true_cov - spline_infilled.cov().to_numpy(), ord='fro')
+            cov_diff = true_cov - spline_infilled.cov().to_numpy()
+            if np.any(np.isnan(cov_diff)):
+                spline_cov_err = float('nan')
+            else:
+                spline_cov_err = np.linalg.norm(cov_diff, ord='fro')
         except (ValueError, np.linalg.LinAlgError):
             spline_cov_err = float('nan')
         
@@ -113,7 +125,7 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
             "Covariance Error (Frobenius)": float(spline_cov_err),
             "Runtime (s)": float(spline_time)
         }
-    except (ValueError, RuntimeError, ImportError) as e:
+    except Exception as e:
         results["Cubic Spline"] = {"Error": str(e)}
 
     # ==========================================
@@ -131,10 +143,16 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
             mice_infilled_data = mice_infilled_combined[:, 1:]
             mice_time = time.time() - start
             
+            if np.any(np.isnan(mice_infilled_data)):
+                raise ValueError("Imputation returned NaN values.")
             mice_rmse = np.sqrt(np.mean((df_truth.to_numpy() - mice_infilled_data) ** 2))
             mice_infilled_df = pd.DataFrame(mice_infilled_data, columns=df_truth.columns)
             try:
-                mice_cov_err = np.linalg.norm(true_cov - mice_infilled_df.cov().to_numpy(), ord='fro')
+                cov_diff = true_cov - mice_infilled_df.cov().to_numpy()
+                if np.any(np.isnan(cov_diff)):
+                    mice_cov_err = float('nan')
+                else:
+                    mice_cov_err = np.linalg.norm(cov_diff, ord='fro')
             except (ValueError, np.linalg.LinAlgError):
                 mice_cov_err = float('nan')
             
@@ -143,7 +161,7 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
                 "Covariance Error (Frobenius)": float(mice_cov_err),
                 "Runtime (s)": float(mice_time)
             }
-        except (ValueError, RuntimeError, ImportError) as e:
+        except Exception as e:
             results["MICE"] = {"Error": str(e)}
     else:
         results["MICE"] = {"Status": "Not Available (Scikit-Learn experimental features missing)"}
@@ -154,43 +172,54 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
     if GP_AVAILABLE:
         start = time.time()
         try:
-            n_valid_max = max((~np.isnan(df_masked.to_numpy()[:, c])).sum() for c in range(n_channels))
-            if n_valid_max > gp_max_valid:
-                results["Gaussian Process"] = {"Status": f"Skipped: too many valid points ({n_valid_max}) for O(n³) GP"}
-            else:
-                gp_infilled_data = np.zeros_like(df_truth.to_numpy())
-                for c in range(n_channels):
-                    col_data = df_masked.to_numpy()[:, c]
-                    valid = ~np.isnan(col_data)
-                    n_valid = valid.sum()
-                    if n_valid < 2:
-                        # Not enough observations to fit a GP; fill with NaN to avoid biased scores
-                        gp_infilled_data[:, c] = np.nan if n_valid == 0 else np.nanmean(col_data)
-                        continue
-                    
-                    gp = GaussianProcessRegressor(
-                        kernel=RBF(length_scale=np.ptp(timestamps) / np.sqrt(len(timestamps))),
-                        alpha=0.1,
-                        random_state=42,
-                        n_restarts_optimizer=3
-                    )
-                    gp.fit(timestamps[valid].reshape(-1, 1), col_data[valid])
-                    gp_infilled_data[:, c] = gp.predict(timestamps.reshape(-1, 1))
-                    
-                gp_time = time.time() - start
-                gp_rmse = np.sqrt(np.mean((df_truth.to_numpy() - gp_infilled_data) ** 2))
-                gp_infilled_df = pd.DataFrame(gp_infilled_data, columns=df_truth.columns)
-                try:
-                    gp_cov_err = np.linalg.norm(true_cov - gp_infilled_df.cov().to_numpy(), ord='fro')
-                except (ValueError, np.linalg.LinAlgError):
-                    gp_cov_err = float('nan')
+            gp_infilled_data = np.zeros_like(df_truth.to_numpy())
+            any_skipped = False
+            for c in range(n_channels):
+                col_data = df_masked.to_numpy()[:, c]
+                valid = ~np.isnan(col_data)
+                n_valid = valid.sum()
+                if n_valid > gp_max_valid:
+                    print(f"[INFO] Skipping GP for channel {c} due to too many valid points ({n_valid} > {gp_max_valid})")
+                    any_skipped = True
+                    col_series = pd.Series(col_data)
+                    gp_infilled_data[:, c] = col_series.interpolate(method='linear').ffill().bfill().to_numpy()
+                    continue
+                if n_valid < 2:
+                    # Not enough observations to fit a GP; fill with NaN to avoid biased scores
+                    gp_infilled_data[:, c] = np.nan if n_valid == 0 else np.nanmean(col_data)
+                    continue
                 
-                results["Gaussian Process"] = {
-                    "RMSE": float(gp_rmse),
-                    "Covariance Error (Frobenius)": float(gp_cov_err),
-                    "Runtime (s)": float(gp_time)
-                }
-        except (ValueError, RuntimeError, ImportError) as e:
+                gp = GaussianProcessRegressor(
+                    kernel=RBF(length_scale=np.ptp(timestamps) / np.sqrt(len(timestamps))),
+                    alpha=0.1,
+                    random_state=42,
+                    n_restarts_optimizer=3
+                )
+                gp.fit(timestamps[valid].reshape(-1, 1), col_data[valid])
+                gp_infilled_data[:, c] = gp.predict(timestamps.reshape(-1, 1))
+                
+            gp_time = time.time() - start
+            if np.any(np.isnan(gp_infilled_data)):
+                raise ValueError("Imputation returned NaN values.")
+            gp_rmse = np.sqrt(np.mean((df_truth.to_numpy() - gp_infilled_data) ** 2))
+            gp_infilled_df = pd.DataFrame(gp_infilled_data, columns=df_truth.columns)
+            try:
+                cov_diff = true_cov - gp_infilled_df.cov().to_numpy()
+                if np.any(np.isnan(cov_diff)):
+                    gp_cov_err = float('nan')
+                else:
+                    gp_cov_err = np.linalg.norm(cov_diff, ord='fro')
+            except (ValueError, np.linalg.LinAlgError):
+                gp_cov_err = float('nan')
+            
+            results["Gaussian Process"] = {
+                "RMSE": float(gp_rmse),
+                "Covariance Error (Frobenius)": float(gp_cov_err),
+                "Runtime (s)": float(gp_time)
+            }
+            if any_skipped:
+                results["Gaussian Process"]["Status"] = "Completed with some channels skipped (linear fallback)"
+        except Exception as e:
             results["Gaussian Process"] = {"Error": str(e)}
     else:
         results["Gaussian Process"] = {"Status": "Not Available (Scikit-Learn missing)"}

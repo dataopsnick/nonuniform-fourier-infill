@@ -8,7 +8,8 @@ version = "0.1.0"
 description = "A high-performance, GPU-accelerated non-uniform Fourier infilling library. Note: For GPU acceleration, a CUDA-capable or MPS-capable PyTorch must be installed separately."
 readme = "README.md"
 requires-python = ">=3.9"
-license = {text = "MIT"}
+license = "MIT"
+license-files = ["LICENSE*"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Science/Research",

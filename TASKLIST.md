@@ -56,7 +56,7 @@ relaxing this to a softer check with a tolerance margin.
 +     )
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="WILL-NOT-DO">
     <id>3</id>
     <title>torch_kernels.py:146-147 - Frequency axis misalignment in covariance_compensation</title>
     <description><![CDATA[
@@ -128,7 +128,7 @@ imputer instantiations.
 +     imputer = NufiImputer(method=method, covariance_compensation=True)
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="WILL-NOT-DO">
     <id>5</id>
     <title>torch_kernels.py:83-84 - NUDFT sign convention mismatch between forward and inverse transforms</title>
     <description><![CDATA[
@@ -151,7 +151,7 @@ them before passing to this function").
           exponent = -2.0j * np.pi * t_timestamps.unsqueeze(1) * f_k.unsqueeze(0)
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="WILL-NOT-DO">
     <id>6</id>
     <title>torch_kernels.py:324-329 - Memory guard missing for augmented system in direct solver</title>
     <description><![CDATA[
@@ -175,7 +175,7 @@ MAX_ELEMENTS`.
           )
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="WILL-NOT-DO">
     <id>7</id>
     <title>torch_kernels.py:191-202 - Weak regularization may still lead to LDL failure with no fallback</title>
     <description><![CDATA[
@@ -295,7 +295,7 @@ warning.
               ext_include_dirs.append(os.path.join(libomp_path, "include"))
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="WILL-NOT-DO">
     <id>10</id>
     <title>torch_kernels.py:47-49 - Silently diverging Nyquist estimates across batch calls</title>
     <description><![CDATA[
@@ -399,7 +399,7 @@ fitting GPs on the remaining channels, or at least logging which channel trigger
                   results["Gaussian Process"] = {"Status": f"Skipped: too many valid points ({n_valid_max}) for O(n³) GP"}
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="WILL-NOT-DO">
     <id>15</id>
     <title>torch_kernels.py:336-338 - Unvalidated solver parameter in solve_tikhonov_nudft</title>
     <description><![CDATA[
@@ -596,7 +596,7 @@ self.skipTest to gracefully handle missing optional dependencies.
 +             self.skipTest("matplotlib not available")
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="WILL-NOT-DO">
     <id>20</id>
     <title>torch_kernels.py:124-129 - Duplicate timestamps cause undefined behavior in np.interp</title>
     <description><![CDATA[
@@ -629,7 +629,7 @@ v_data = v_data[unique_mask]
           uniform_data = np.interp(uniform_grid, v_timestamps, v_data)
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="WILL-NOT-DO">
     <id>21</id>
     <title>wrappers.py:228-228 - Bug: imputer.clone() may not exist.</title>
     <description><![CDATA[
@@ -728,7 +728,7 @@ Add similar validation after sorting (or before fit_transform) for parity.
       infilled_pd = imputer.fit_transform(pd_df)
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="WILL-NOT-DO">
     <id>24</id>
     <title>wrappers.py:84-97 - Bug: keep_time_col=True produces inconsistent index vs. column after imputation.</title>
     <description><![CDATA[
@@ -787,7 +787,7 @@ index is unique and matches the original index structure.
           )
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="WILL-NOT-DO">
     <id>26</id>
     <title>impute.py:154-157 - Fallback n_f can exceed N_val for small datasets, causing underdetermined systems.</title>
     <description><![CDATA[
@@ -812,7 +812,7 @@ safe upper bound like `min(5, N_val)`).
                   best_alpha = 1.0
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="WILL-NOT-DO">
     <id>27</id>
     <title>impute.py:290-305 - Stochastic imputation with near-zero cov_scale causes catastrophic noise amplification.</title>
     <description><![CDATA[
@@ -854,7 +854,7 @@ small.
 +                         imputed_vals = reconstructed_np[nan_mask] + noise
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="WILL-NOT-DO">
     <id>28</id>
     <title>impute.py:196-206 - Covariance compensation permutation mapping may be misa...</title>
     <description><![CDATA[
@@ -895,7 +895,7 @@ contract.
 +                         self.lu_[full_i, full_j] = lu_small[inv_perm[i], inv_perm[j]]
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="WILL-NOT-DO">
     <id>29</id>
     <title>impute.py:31-34 - lu_ (full LDL^T) is computed but never used in trans...</title>
     <description><![CDATA[
@@ -1211,7 +1211,7 @@ format. PEP 639 (accepted) recommends using a simple string (`license = "MIT"`) 
 + license-files = ["LICENSE*"]
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="WILL-NOT-DO">
     <id>44</id>
     <title>9616a63c15eb89930eeff928edf65d2033fb35:0-0 - Multiple binary Git internal object files were found (e.g.,</title>
     <description><![CDATA[

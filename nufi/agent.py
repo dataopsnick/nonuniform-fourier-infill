@@ -123,8 +123,8 @@ class TransformationTracker:
                             continue
                         step_name = "_".join(parts[2:]).replace(".parquet", "")
                     else:
-                        version_id = parts[0]
-                        step_name = parts[1].replace(".parquet", "")
+                        # Unknown naming pattern; skip safely
+                        continue
                     versions.append({
                         "version_id": version_id,
                         "step_name": step_name,
@@ -247,6 +247,7 @@ def impute_dataframe(
     pre_ver = tracker.save_snapshot(df, "pre_infill")
 
     df_copy = df.copy()
+    original_index = df_copy.index.copy()  # Preserve for restoration
     if time_col is not None:
         if time_col not in df_copy.columns:
             raise KeyError(
@@ -345,6 +346,8 @@ def impute_dataframe(
     # Restore original index/columns name or structure if time_col was used
     if time_col is not None:
         infilled_df = infilled_df.reset_index().rename(columns={'index': time_col})
+    else:
+        infilled_df.index = original_index
 
     # Generate JSON diagnostic metadata and column details
     diagnostics = {}
@@ -604,11 +607,18 @@ def plot_diagnostics(
         v_timestamps = timestamps[valid_mask]
         v_data = orig_data[valid_mask]
         
+        # Ensure sorted before computing sampling intervals
+        if len(v_timestamps) > 1 and not np.all(np.diff(v_timestamps) >= 0):
+            sort_idx = np.argsort(v_timestamps)
+            v_timestamps = v_timestamps[sort_idx]
+            v_data = v_data[sort_idx]
+            
         opt_alpha = diag.get("optimized_alpha", 1e-4)
         n_f = diag.get("n_frequencies", len(timestamps))
         
-        p_n = np.diff(v_timestamps) if len(v_timestamps) > 1 else [1.0]
-        min_p = np.nanmin(p_n) if len(p_n) > 0 and np.nanmin(p_n) > 0 else 1.0
+        p_n = np.diff(v_timestamps) if len(v_timestamps) > 1 else np.array([1.0])
+        pos_mask = p_n > 0
+        min_p = np.min(p_n[pos_mask]) if np.any(pos_mask) else 1.0
         max_sampling_rate = 1.0 / min_p
         nyquist_frequency = max_sampling_rate / 2.0
         f_k = np.linspace(0, nyquist_frequency, n_f)
