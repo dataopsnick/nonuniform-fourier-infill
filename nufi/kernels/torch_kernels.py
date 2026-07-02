@@ -285,7 +285,7 @@ def optimize_alpha_gcv(A, y, alphas=None, return_svd=False):
         if score < best_score:
             best_score = score
             best_alpha = alpha
-            
+
     if return_svd:
         return best_alpha, U, S, y_tilde, y_norm_sq
     return best_alpha

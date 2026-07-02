@@ -314,4 +314,4 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             
         if isinstance(X, pd.DataFrame):
             return pd.DataFrame(infilled_data, index=X.index, columns=X.columns)
-        return infilled_data
+        return infilled_data 

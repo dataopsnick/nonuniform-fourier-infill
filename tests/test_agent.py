@@ -40,7 +40,7 @@ class TestAgentNativeLayer(unittest.TestCase):
             log_path=self.test_log,
             history_dir=self.test_history
         )
-        
+    
         # Verify infilling success
         self.assertFalse(infilled_df["signal"].isna().any())
         self.assertEqual(len(infilled_df), len(self.df))

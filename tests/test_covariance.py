@@ -42,7 +42,7 @@ def test_derivative_continuity(method):
     linear_fill = np.interp(t, t[valid], signal[valid])
     lin_dx = np.diff(linear_fill)
     lin_ddx = np.diff(lin_dx)
-    
+
     # Fourier infill should not introduce larger derivative spikes than linear interpolation.
     # Allow small margin: Fourier should be smoother, but not guaranteed to be strictly <= linear
     assert np.max(np.abs(dx)) <= 1.5 * np.max(np.abs(lin_dx))

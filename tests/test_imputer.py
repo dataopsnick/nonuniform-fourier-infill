@@ -225,7 +225,7 @@ def test_imputer_edge_cases():
     imputer3 = NufiImputer(covariance_compensation=True)
     X_filled_no_nans = imputer3.fit_transform(X_no_nans)
     assert np.allclose(X_no_nans, X_filled_no_nans)
-    
+
     # 4. Invalid parameters: negative/zero alpha should raise ValueError
     with pytest.raises(ValueError):
         bad_imputer = NufiImputer(alpha=-1.0)

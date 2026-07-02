@@ -649,3 +649,4 @@ def plot_diagnostics(
     else:
         plt.close()
     return fig, axes
+ 

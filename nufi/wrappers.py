@@ -264,7 +264,7 @@ def infill_multiindex_dataframe(df, imputer=None, entity_level=0, time_level=1, 
             f"Concatenated result has {len(infilled_pd)} rows, "
             f"expected {len(pd_df)}. Group-level indices may overlap or be non-unique."
         )
-    
+
     if is_cudf:
         return cudf.DataFrame.from_pandas(infilled_pd)
     return infilled_pd

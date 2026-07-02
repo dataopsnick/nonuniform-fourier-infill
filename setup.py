@@ -156,6 +156,6 @@ setup(
     python_requires=">=3.9",
     install_requires=[
         "numpy>=1.20.0",
-        "packaging",
+        "packaging", 
     ],
 )

@@ -216,7 +216,7 @@ def print_benchmark_results(results: dict):
 if __name__ == "__main__":
     benchmark_results = run_benchmarks(n_samples=250, n_channels=4, missing_rate=0.3)
     print_benchmark_results(benchmark_results)
-    
+
     # Save results to disk
     try:
         from datetime import datetime
