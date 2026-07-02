@@ -72,7 +72,7 @@ def compute_ND_NUDFT(X_list, device=None, nyquist_frequency=None):
         t_data_all = torch.tensor(v_data, dtype=torch.float64, device=dev)
 
         MAX_MEM_N = 10_000
-        if (N+M)*M > MAX_MEM_N:
+        if N > MAX_MEM_N:
             raise ValueError(
                 f"N={N} exceeds MAX_MEM_N={MAX_MEM_N}. "
                 f"Use compute_Fast_ND_NUDFT for large signals to avoid excessive memory consumption."
@@ -163,15 +163,20 @@ def compute_Fast_ND_NUDFT(X_list, device=None, nyquist_frequency=None):
         F_grid = torch.fft.fft(grid)
 
         # 5. Apodization Deconvolution
+        # Guard against N_full exceeding the FFT grid size M
+        n_out = min(N_full, M)
         # Divide out the effect of the Gaussian smear in the frequency domain
-        k = torch.arange(N_full, dtype=torch.float64, device=dev)
+        k = torch.arange(n_out, dtype=torch.float64, device=dev)
         # Use a sigma scaling that matches the computed sigma from M
         apodization = torch.exp((k**2) * (sigma**2) / 2.0)
         
         # Extract the positive frequencies, apply analytic correction and grid normalisation
         # To maintain length matching len(data) = N_full, we slice and compute up to N_full
-        F = F_grid[:N_full] * apodization / M
-        
+        F = F_grid[:n_out] * apodization / M
+        # Pad to N_full length if needed (higher frequencies are beyond resolution)
+        if n_out < N_full:
+            pad = torch.zeros(N_full - n_out, dtype=torch.complex128, device=dev)
+            F = torch.cat([F, pad])        
         results.append(F)
 
     return results

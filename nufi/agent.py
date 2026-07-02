@@ -65,14 +65,13 @@ class TransformationTracker:
     def save_snapshot(self, df: pd.DataFrame, step_name: str) -> str:
         """Saves a dataframe snapshot with timestamp and unique version ID."""
         version_id = f"ver_{int(time.time() * 1000)}_{uuid.uuid4().hex[:8]}"
-        filename = f"{version_id}_{step_name}.csv"
+        # Use parquet for I/O performance, dtype preservation, and storage efficiency
+        filename = f"{version_id}_{step_name}.parquet"
         filepath = os.path.join(self.history_dir, filename)
         
         with self._lock:
             # Write parquet first (if it fails, no log pollution)
             try:
-                # Swap to parquet for I/O performance, dtype preservation, and storage efficiency
-                filepath = filepath.replace('.csv', '.parquet')
                 df.to_parquet(filepath, engine='pyarrow', compression='snappy', index=True)
             except Exception as e:
                 raise TransformationLoggingError(f"Failed to save data snapshot {filepath}: {e}")
@@ -89,7 +88,7 @@ class TransformationTracker:
             try:
                 self.log_transformation(log_entry)
             except Exception as e:
-                # Clean up orphaned CSV to keep history consistent
+                # Clean up orphaned parquet to keep history consistent
                 try:
                     os.remove(filepath)
                 except OSError as rm_err:
