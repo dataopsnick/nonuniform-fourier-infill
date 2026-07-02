@@ -24,19 +24,26 @@ def compute_ND_NUDFT(X_list, device=None, nyquist_frequency=None):
 
     .. note::
         Uses the forward (analysis) NUDFT convention: A[n,k] = exp(-2πi * t_n * f_k).
+        WARNING: `solve_tikhonov_nudft` uses the synthesis convention exp(+2πi*t_n*f_k).
+        Conjugate coefficients before passing between these functions to avoid phase errors.
     """
     dev = get_device(device)
     results = []
+    
+    if nyquist_frequency is None and len(X_list) > 1:
+        import warnings
+        warnings.warn(
+            "nyquist_frequency not provided; estimating per-signal Nyquist. "
+            "This may produce inconsistent frequency grids across signals. "
+            "Pass an explicit nyquist_frequency for multi-signal workflows."
+        )
 
     for X in X_list:
-        # X should have X.timestamps and X.data
         timestamps = np.array(X.timestamps, dtype=np.float64)
         data = np.array(X.data, dtype=np.float64)
 
-        # Mask out NaN values
         valid_mask = ~np.isnan(data) & ~np.isnan(timestamps)
         if not np.any(valid_mask):
-            # All NaNs, return zeros
             results.append(torch.zeros(len(data), dtype=torch.complex128, device=dev))
             continue
 
@@ -44,43 +51,34 @@ def compute_ND_NUDFT(X_list, device=None, nyquist_frequency=None):
         v_data = data[valid_mask]
 
         N = len(data)
-        # Use caller-provided Nyquist if available, otherwise estimate from sampling
         if nyquist_frequency is None:
             if len(v_timestamps) > 1:
-                # Sort to ensure positive diffs
                 sort_idx = np.argsort(v_timestamps)
                 sorted_ts = v_timestamps[sort_idx]
                 p_n = np.diff(sorted_ts)
-                p_n = p_n[p_n > 0]  # keep only positive intervals
+                p_n = p_n[p_n > 0] 
                 if len(p_n) > 0:
                     median_p = np.median(p_n)
                     estimated_nyquist = 0.5 / max(median_p, 1e-12)
                 else:
-                    import warnings
-                    warnings.warn("Cannot estimate Nyquist frequency; all sampling intervals are zero or negative. Defaulting to 1.0.")
                     estimated_nyquist = 1.0
             else:
-                import warnings
-                warnings.warn("Only one valid sample; cannot estimate Nyquist frequency. Defaulting to 1.0.")
                 estimated_nyquist = 1.0
         else:
             estimated_nyquist = nyquist_frequency
 
         f_k = torch.linspace(0, estimated_nyquist, N, dtype=torch.float64, device=dev)
-
-        # Standard NUDFT: A[n,k] = exp(-2πi * t_n * f_k), then sum over n
         t_timestamps = torch.tensor(v_timestamps, dtype=torch.float64, device=dev)
         t_data_all = torch.tensor(v_data, dtype=torch.float64, device=dev)
 
-        # Guard against excessive memory for large N
         MAX_MEM_N = 10_000
-        if N > MAX_MEM_N:
+        if (N+M)*M > MAX_MEM_N:
             raise ValueError(
                 f"N={N} exceeds MAX_MEM_N={MAX_MEM_N}. "
                 f"Use compute_Fast_ND_NUDFT for large signals to avoid excessive memory consumption."
             )
 
-        # Forward NUDFT: A[n,k] = exp(-2πi * t_n * f_k)  (analysis convention)
+        # Forward NUDFT: A[n,k] = exp(-2πi * t_n * f_k)
         exponent = -2.0j * np.pi * t_timestamps.unsqueeze(1) * f_k.unsqueeze(0)
         summation = torch.sum(t_data_all.to(torch.complex128).unsqueeze(1) * torch.exp(exponent), dim=0)
         
@@ -93,12 +91,6 @@ def compute_Fast_ND_NUDFT(X_list, device=None):
     Performs Fast Non-Uniform DFT by interpolating onto a uniform grid 
     and computing FFT using PyTorch rfft/fft.
     Gracefully handles NaNs during interpolation.
-
-    .. warning::
-        This function uses linear interpolation, which introduces spectral
-        leakage and amplitude distortion. It is a fast approximation, not an
-        exact NUDFT. For higher accuracy, consider compute_ND_NUDFT or a
-        gridding-based approach.
     """
     dev = get_device(device)
     results = []
@@ -107,7 +99,6 @@ def compute_Fast_ND_NUDFT(X_list, device=None):
         timestamps = np.array(X.timestamps, dtype=np.float64)
         data = np.array(X.data, dtype=np.float64)
 
-        # Handle NaNs in data by linear interpolation/forward-fill
         valid_mask = ~np.isnan(data) & ~np.isnan(timestamps)
         if not np.any(valid_mask):
             results.append(torch.zeros(len(data), dtype=torch.complex128, device=dev))
@@ -121,13 +112,20 @@ def compute_Fast_ND_NUDFT(X_list, device=None):
         t_min, t_max = np.min(v_timestamps), np.max(v_timestamps)
         uniform_grid = np.linspace(t_min, t_max, N)
         uniform_grid = np.clip(uniform_grid, t_min, t_max)
+
         # Ensure timestamps are sorted for np.interp (requires monotonic increasing)
+        
         if not np.all(np.diff(v_timestamps) >= 0):
             sort_idx = np.argsort(v_timestamps)
             v_timestamps = v_timestamps[sort_idx]
             v_data = v_data[sort_idx]
+            
+        # Remove duplicate timestamps (np.interp behavior is undefined for non-unique x)
+        unique_mask = np.concatenate(([True], np.diff(v_timestamps) > 0))
+        v_timestamps = v_timestamps[unique_mask]
+        v_data = v_data[unique_mask]
+        
         uniform_data = np.interp(uniform_grid, v_timestamps, v_data)
-
         # Compute FFT using PyTorch
         t_uniform_data = torch.tensor(uniform_data, dtype=torch.float64, device=dev)
         fft_result = torch.fft.fft(t_uniform_data)
@@ -143,8 +141,22 @@ def covariance_compensation(X_list, device=None):
     """
     dev = get_device(device)
     
-    # Step 1: Compute NUDFT results
-    X_k_result = compute_ND_NUDFT(X_list, device=dev)
+    # Step 1: Estimate a common Nyquist across all signals to ensure aligned frequency bins
+    all_diffs = []
+    for X in X_list:
+        ts = np.array(X.timestamps, dtype=np.float64)
+        v_ts = ts[~np.isnan(ts)]
+        if len(v_ts) > 1:
+            sorted_ts = np.sort(v_ts)
+            diffs = np.diff(sorted_ts)
+            all_diffs.extend(diffs[diffs > 0].tolist())
+            
+    if all_diffs:
+        common_nyquist = 0.5 / max(np.median(all_diffs), 1e-12)
+    else:
+        common_nyquist = 1.0
+
+    X_k_result = compute_ND_NUDFT(X_list, device=dev, nyquist_frequency=common_nyquist)
 
     # Step 2: Flatten & stack the data (preserving phase information)
     # Move to CPU for covariance and LDL^T since scipy/pandas functions are optimized there
@@ -155,13 +167,13 @@ def covariance_compensation(X_list, device=None):
             f"All signals must have the same length, got lengths {lens}. "
             f"Signals of different lengths cannot be covariance-compensated."
         )
+        
     flat_data = []
     for tensor in X_k_result:
         arr = tensor.cpu().numpy()
         flat_data.append(np.concatenate([arr.real, arr.imag]))
 
     flat_data = np.array(flat_data).T # Shape: samples x dimensions
-
     # Step 3: Compute covariance matrix
     # Shape: (num_samples, num_dimensions)
     covariance_matrix = np.cov(flat_data, rowvar=False)
@@ -169,11 +181,11 @@ def covariance_compensation(X_list, device=None):
     # Detect degenerate columns on the diagonal of the covariance matrix
     diag = np.diag(covariance_matrix)
     diag_nan = np.isnan(diag)
-    valid_idx = np.arange(covariance_matrix.shape[0])  # default: all valid
+    valid_idx = np.arange(covariance_matrix.shape[0]) # default: all valid
+    
     if np.any(diag_nan):
         import warnings
-        n_nan = diag_nan.sum()
-        warnings.warn(f"Covariance matrix contains NaN on diagonal in {n_nan} entries; degenerate columns detected. Applying regularization.")
+        warnings.warn(f"Covariance matrix contains NaN on diagonal in {diag_nan.sum()} entries. Dropping degenerate columns.")
         # Drop degenerate real/imag pairs together: for each NaN diagonal entry at index k,
         # also drop its paired component (assuming real at even indices, imag at odd, or
         # N real then N imag layout).
@@ -188,22 +200,26 @@ def covariance_compensation(X_list, device=None):
             raise ValueError("All columns are degenerate; cannot compute covariance compensation.")
         covariance_matrix = covariance_matrix[np.ix_(valid_idx, valid_idx)]
 
-    # Regularize to ensure positive-definiteness for LDL^T
-    # Scale epsilon relative to the matrix magnitude for robustness
+    # Step 3: LDL^T decomposition with progressive regularization fallback
     diag_mean = np.mean(np.diag(covariance_matrix))
     eps = max(1e-10 * max(diag_mean, 0.0), 1e-10)
-    covariance_matrix = covariance_matrix + eps * np.eye(covariance_matrix.shape[0])
+    
+    max_retries = 5
+    for attempt in range(max_retries):
+        cov_reg = covariance_matrix + eps * np.eye(covariance_matrix.shape[0])
+        # Step 4: Perform LDL^T decomposition
+        # LDL^T factorizes A = P * L * D * L^T
+        try:
+            lu, d, perm = scipy.linalg.ldl(cov_reg)
+            break
+        except Exception:
+            if attempt == max_retries - 1:
+                raise ValueError("LDL decomposition failed even after regularization; covariance matrix may be singular.")
+            eps *= 10.0
 
-    # Step 4: Perform LDL^T decomposition
-    # LDL^T factorizes A = P * L * D * L^T
-    try:
-        lu, d, perm = scipy.linalg.ldl(covariance_matrix)
-    except Exception:
-        raise ValueError("LDL decomposition failed; covariance matrix may be singular.")
-
-    return lu, d, perm, valid_idx  # valid_idx: indices into the full (pre-drop) covariance matrix.
+    # valid_idx: indices into the full (pre-drop) covariance matrix.
     # Caller must map back to signal space: signal_idx = valid_idx // 2
-    # and to real/imag component: component = valid_idx % 2  (0=real, 1=imag)
+    return lu, d, perm, valid_idx  
 
 def solve_cg(A, b, alpha, max_iter=100, tol=1e-5):
     """
@@ -218,7 +234,7 @@ def solve_cg(A, b, alpha, max_iter=100, tol=1e-5):
     dev = A.device
     M = A.shape[1]
     x = torch.zeros(M, dtype=torch.complex128, device=dev)
-    
+
     # NOTE: H(v) = A^H A v + alpha v applies CG to the normal equations,
     # which squares the condition number of A. For ill-conditioned A, prefer
     # the augmented-system (direct) solver in solve_tikhonov_nudft.
@@ -293,17 +309,18 @@ def optimize_alpha_gcv(A, y, alphas=None, return_svd=False):
 def solve_tikhonov_nudft(timestamps, data, f_k, alpha, solver='direct', max_iter=100, tol=1e-5, device=None):
     """
     Solves the continuous-time NUDFT coefficients using L2/Tikhonov regularization.
-    Supports 'direct' SVD/normal-equation solvers or 'cg' Conjugate Gradient.
-
+    
     .. note::
-        Uses the synthesis (inverse) NUDFT convention where the synthesis matrix
-        has elements A[n,k] = exp(2πi * t_n * f_k).
+        WARNING: Uses the synthesis convention exp(+2πi*t_n*f_k). If you obtained 
+        coefficients from `compute_ND_NUDFT`, you must conjugate them first.
     """
+    if solver not in ('direct', 'cg'):
+        raise ValueError(f"Unknown solver '{solver}'. Supported solvers: 'direct', 'cg'.")
+        
     if alpha <= 0:
         raise ValueError(f"Regularization parameter alpha must be positive, got {alpha}")
 
     dev = get_device(device)
-    
     # Validate inputs
     timestamps = np.asarray(timestamps, dtype=np.float64)
     data = np.asarray(data, dtype=np.float64)
@@ -322,11 +339,14 @@ def solve_tikhonov_nudft(timestamps, data, f_k, alpha, solver='direct', max_iter
     # A_nk = exp(2*pi*i * f_k * t_n)
     N, M = len(t_timestamps), len(t_f_k)
     MAX_ELEMENTS = 50_000_000  # ~800 MB for complex128
-    if N * M > MAX_ELEMENTS and solver != 'cg':
+    
+    # Guard includes augmented size [A; sqrt(alpha)*I]
+    if (N + M) * M > MAX_ELEMENTS and solver != 'cg':
         raise ValueError(
-            f"Matrix A shape ({N},{M}) has {N*M} elements; exceeds memory safety limit. "
+            f"Augmented matrix shape ({N+M},{M}) has {(N+M)*M} elements; exceeds memory safety limit. "
             f"Use solver='cg' to avoid materializing the full matrix."
         )
+        
     exponent = 2.0j * np.pi * t_timestamps.unsqueeze(1) * t_f_k.unsqueeze(0)
     A = torch.exp(exponent)
     

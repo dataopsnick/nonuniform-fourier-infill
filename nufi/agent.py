@@ -71,7 +71,9 @@ class TransformationTracker:
         with self._lock:
             # Write CSV first (if it fails, no log pollution)
             try:
-                df.to_csv(filepath, index=True)
+                # Swap to parquet for I/O performance, dtype preservation, and storage efficiency
+                filepath = filepath.replace('.csv', '.parquet')
+                df.to_parquet(filepath, engine='pyarrow', compression='snappy', index=True)
             except Exception as e:
                 raise TransformationLoggingError(f"Failed to save data snapshot {filepath}: {e}")
             # Log only after successful write to avoid orphan entries
@@ -90,8 +92,13 @@ class TransformationTracker:
                 # Clean up orphaned CSV to keep history consistent
                 try:
                     os.remove(filepath)
-                except OSError:
-                    pass
+                except OSError as rm_err:
+                    import warnings
+                    warnings.warn(
+                        f"Failed to remove orphaned snapshot {filepath} after log write failure: {rm_err}. "
+                        f"Manual cleanup may be required.",
+                        UserWarning
+                    )
                 raise TransformationLoggingError(f"Failed to write to transformation log: {e}")
         return version_id
 
@@ -649,4 +656,3 @@ def plot_diagnostics(
     else:
         plt.close()
     return fig, axes
- 

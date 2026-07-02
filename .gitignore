@@ -1,3 +1,7 @@
+# Git
+.git/
+.git/*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -97,3 +101,6 @@ venv.bak/
 .nufi_history/
 *.log
 benchmark_results_*.json
+
+# MacOS System File
+.DS_Store

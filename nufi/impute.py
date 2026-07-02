@@ -28,10 +28,6 @@ class NufiImputer(BaseEstimator, TransformerMixin):
         self.max_iter = max_iter
         self.tol = tol
         self.random_state = random_state
-        # Note: lu_ and perm_ are stored for potential downstream use in full
-        # covariance-aware reconstruction. Currently only d_ (diagonal scaling)
-        # is applied in transform(). Consider implementing full LDL^T application
-        # for proper multi-signal covariance compensation.
         self.lu_ = None
         self.d_ = None
         self.perm_ = None
@@ -135,8 +131,18 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                         )
                     else:
                         opt_alpha = self.alpha if self.alpha is not None else 1e-4
-                        U, S, Vh = torch.linalg.svd(A, full_matrices=False)
-                        y_complex = t_data.to(torch.complex128)
+                        # Hardware guardrail: Subsample to avoid OOM during SVD
+                        MAX_SVD_SAMPLES = 2000
+                        if A.shape[0] > MAX_SVD_SAMPLES:
+                            sub_idx_np = rng.choice(A.shape[0], MAX_SVD_SAMPLES, replace=False)
+                            sub_idx = torch.tensor(np.sort(sub_idx_np), device=dev)
+                            A_sub = A[sub_idx, :]
+                            y_sub = t_data[sub_idx].to(torch.complex128)
+                        else:
+                            A_sub, y_sub = A, t_data.to(torch.complex128)
+                         
+                        U, S, Vh = torch.linalg.svd(A_sub, full_matrices=False)
+                        y_complex = y_sub
                         y_tilde = torch.matmul(U.adjoint(), y_complex)
                         y_norm_sq = torch.sum(torch.abs(y_complex) ** 2)
                 except (RuntimeError, torch.linalg.LinAlgError, ValueError) as e:
@@ -153,7 +159,7 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             
             if best_gcv == float('inf'):
                 import warnings
-                best_n_freq = max(5, min(N_val - 1, N_val // 2))  # ensure n_f < N_val to avoid underdetermined system
+                best_n_freq = max(1, min(5, N_val - 1)) # ensure n_f < N_val to avoid underdetermined system
                 best_alpha = 1.0
                 warnings.warn(
                     f"All GCV candidates failed SVD for column {col_idx}. "
@@ -186,24 +192,26 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                 self.d_ = np.eye(n_cols)
                 self.perm_ = np.arange(n_cols)
                 
-                # Note: valid_idx_comp should reference indices in the original (non-doubled) space.
-                # If it references doubled space, this will cause an IndexError.
-                actual_valid_cols = [valid_cols[idx] for idx in valid_idx_comp if idx < len(valid_cols)]
+                n_valid = len(valid_cols)
+                # valid_idx_comp references the doubled (real+imag) space. Extract the real part indices.
+                real_indices = [i for i, v in enumerate(valid_idx_comp) if v < n_valid]
                 
-                for i, c_i in enumerate(actual_valid_cols):
-                    self.perm_[c_i] = actual_valid_cols[perm_small[i]]
-                
-                # Map small matrices back to full size using perm_small mapping
-                n_small = len(perm_small)
-                for i in range(n_small):
-                    full_i = actual_valid_cols[perm_small[i]]
-                    self.d_[full_i, full_i] = d_small[i]
-                
-                for i in range(n_small):
-                    full_i = actual_valid_cols[perm_small[i]]
-                    for j in range(n_small):
-                        full_j = actual_valid_cols[perm_small[j]]
-                        self.lu_[full_i, full_j] = lu_small[i, j]
+                if len(real_indices) > 0:
+                    lu_real = lu_small[np.ix_(real_indices, real_indices)]
+                    d_real = d_small[np.ix_(real_indices, real_indices)]
+                    perm_real = np.argsort(np.argsort(perm_small[real_indices]))
+                    
+                    actual_valid_cols = [valid_cols[valid_idx_comp[i]] for i in real_indices]
+                    n_small = len(actual_valid_cols)
+                    inv_perm = np.argsort(perm_real)
+                    
+                    for i in range(n_small):
+                        full_i = actual_valid_cols[i]
+                        self.perm_[full_i] = actual_valid_cols[perm_real[i]]
+                        self.d_[full_i, full_i] = d_real[inv_perm[i], inv_perm[i]]
+                        for j in range(n_small):
+                            full_j = actual_valid_cols[j]
+                            self.lu_[full_i, full_j] = lu_real[inv_perm[i], inv_perm[j]]
             else:
                 self.lu_ = np.eye(n_cols)
                 self.d_ = np.eye(n_cols)
@@ -234,9 +242,10 @@ class NufiImputer(BaseEstimator, TransformerMixin):
         
         infilled_data = np.zeros_like(X_data)
         # Note: these dictionaries store per-column full-length arrays and may be large for many-column datasets.
-        self.reconstructed_ = {}
-        self.coefficients_ = {}
+        # Use locally scoped variables; DO NOT attach sample-sized arrays to `self` during transform.
+        local_reconstructed = {}
         
+
         from sklearn.utils import check_random_state
         rng = check_random_state(self.random_state)
         
@@ -268,50 +277,73 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                     f"NUDFT solver failed for column {col_idx} with alpha={alpha}, n_f={n_f}: {e}. "
                     f"Consider using a larger alpha or more observations."
                 )
-            
-            self.coefficients_[col_idx] = F.cpu().numpy()
-            
             # Reconstruct the signal at all timestamps
             t_f_k = torch.tensor(f_k, dtype=torch.float64, device=dev)
             t_times = torch.tensor(t_timestamps, dtype=torch.float64, device=dev)
             
             exponent = 2.0j * np.pi * t_times.unsqueeze(1) * t_f_k.unsqueeze(0)
+            
+            # The "Rug Sweep": We sum the complex exponentials and drop the imaginary 
+            # noise because our target physical signal is purely real.
+            # (V3 Optimization: Rewrite the solver matrix A to use purely real Sines/Cosines)
             reconstructed = torch.real(torch.sum(F.unsqueeze(0) * torch.exp(exponent), dim=1))
-            reconstructed_np = reconstructed.cpu().numpy()
-            self.reconstructed_[col_idx] = reconstructed_np.copy()
             
-            # Compute compensated reconstructed signal for residual analysis
-            cov_scale = 1.0
-            if self.covariance_compensation and self.d_ is not None:
-                cov_scale = np.sqrt(np.abs(np.diag(self.d_)[col_idx]))
+            local_reconstructed[col_idx] = reconstructed.cpu().numpy()
             
-            reconstructed_compensated = reconstructed_np * cov_scale if cov_scale > 0 else reconstructed_np
-            
-            # Fill only the NaNs
+        # --- Apply Full LDL^T Covariance Compensation ---
+        n_samples, n_cols = X_data.shape
+        residual_stds = np.zeros(n_cols)
+        
+        # Calculate base residuals for each column using local_reconstructed
+        for col_idx in range(n_cols):
+            if col_idx not in local_reconstructed:
+                residual_stds[col_idx] = 0.1
+                continue
+                
             nan_mask = np.isnan(X_data[:, col_idx])
-            if np.any(nan_mask):
-                if stochastic:
-                    obs_mask = ~nan_mask
-                    if np.any(obs_mask):
-                        residual = (X_data[obs_mask, col_idx] * cov_scale if cov_scale > 0 else X_data[obs_mask, col_idx]) - reconstructed_compensated[obs_mask]
-                        residual_std = np.std(residual) if len(residual) > 1 else 0.1
-                        if np.isnan(residual_std) or residual_std == 0:
-                            residual_std = 0.1
-                    else:
-                        residual_std = 0.1
-                        
-                    noise = rng.normal(0, stochastic_scale * residual_std, size=nan_mask.sum())
-                    # Convert back to original scale for output
-                    imputed_vals = (reconstructed_compensated[nan_mask] + noise) / cov_scale if cov_scale > 0 else reconstructed_compensated[nan_mask] + noise
-                    X_data[nan_mask, col_idx] = imputed_vals
-                else:
-                    # Deterministic fill: use reconstructed signal (covariance compensation
-                    # only scales/decorrelates residuals, so the deterministic reconstruction
-                    # does not change since the scaling factor cancels out).
-                    X_data[nan_mask, col_idx] = reconstructed_np[nan_mask]
+            obs_mask = ~nan_mask
+            if np.any(obs_mask):
+                residual = X_data[obs_mask, col_idx] - local_reconstructed[col_idx][obs_mask]
+                r_std = np.std(residual) if len(residual) > 1 else 0.1
+                residual_stds[col_idx] = r_std if not (np.isnan(r_std) or r_std == 0) else 0.1
+            else:
+                residual_stds[col_idx] = 0.1
+
+        if stochastic:
+            # 1. Generate UN-SCALED standard normal noise
+            eta = rng.normal(0, 1.0, size=(n_samples, n_cols))
+            
+            if self.covariance_compensation and self.lu_ is not None and self.d_ is not None and self.perm_ is not None:
+                # Reconstruct the transformation matrix T
+                L = self.lu_
+                sqrt_D = np.diag(np.sqrt(np.abs(np.diag(self.d_))))
+                P = np.eye(n_cols)[self.perm_]
+                T = P @ L @ sqrt_D
+                
+                # 2. Apply structural correlation FIRST
+                Z = eta @ T.T
+                
+                # 3. Normalize variances back to 1.0, THEN apply marginal scaling
+                Z_vars = np.diag(T @ T.T)
+                Z_vars[Z_vars == 0] = 1.0
+                noise_correlated = (Z / np.sqrt(Z_vars)) * residual_stds * stochastic_scale
+            else:
+                noise_correlated = eta * residual_stds * stochastic_scale
+        else:
+            noise_correlated = np.zeros((n_samples, n_cols))
+
+        # Fill NaNs with the reconstructed signal + correlated noise
+        for col_idx in range(n_cols):
+            if col_idx not in local_reconstructed:
+                infilled_data[:, col_idx] = X_data[:, col_idx]
+                continue
+                
+            nan_mask = np.isnan(X_data[:, col_idx])
+            imputed_vals = local_reconstructed[col_idx][nan_mask] + noise_correlated[nan_mask, col_idx]
+            X_data[nan_mask, col_idx] = imputed_vals
                     
             infilled_data[:, col_idx] = X_data[:, col_idx]
             
         if isinstance(X, pd.DataFrame):
             return pd.DataFrame(infilled_data, index=X.index, columns=X.columns)
-        return infilled_data 
+        return infilled_data
