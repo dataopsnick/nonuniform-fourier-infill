@@ -72,11 +72,9 @@ def compute_ND_NUDFT(X_list, device=None):
         # Guard against excessive memory for large N
         MAX_MEM_N = 10_000
         if N > MAX_MEM_N:
-            import warnings
-            warnings.warn(
-                f"N={N} exceeds MAX_MEM_N={MAX_MEM_N}; compute_ND_NUDFT may consume "
-                f"excessive memory ({len(v_timestamps)} × {N} complex tensor). "
-                f"Consider using compute_Fast_ND_NUDFT or reduce N."
+            raise ValueError(
+                f"N={N} exceeds MAX_MEM_N={MAX_MEM_N}. "
+                f"Use compute_Fast_ND_NUDFT for large signals to avoid excessive memory consumption."
             )
 
         # Forward NUDFT: A[n,k] = exp(-2πi * t_n * f_k)  (analysis convention)
@@ -154,10 +152,8 @@ def covariance_compensation(X_list, device=None):
     flat_data = np.array(flat_data).T # Shape: samples x dimensions
 
     # Step 3: Compute covariance matrix
-    # Handle any potential remaining NaNs just in case
-    import pandas as pd
-    df = pd.DataFrame(flat_data)
-    covariance_matrix = df.cov().to_numpy()
+    # Shape: (num_samples, num_dimensions)
+    covariance_matrix = np.cov(flat_data, rowvar=False)
 
     # Detect degenerate columns on the diagonal of the covariance matrix
     diag = np.diag(covariance_matrix)

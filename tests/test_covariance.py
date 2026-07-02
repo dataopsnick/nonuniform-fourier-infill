@@ -14,9 +14,14 @@ def test_derivative_continuity():
     # TODO: add parametrized tests for boundary NaNs, multiple gaps, and extreme missing ratios
     # See: https://github.com/example/issues/123 for tracking
     # Infill using our imputer
+    # Consider @pytest.mark.parametrize over all supported methods
     imputer = NufiImputer(method='direct', covariance_compensation=False)
     infilled = imputer.fit_transform(signal.reshape(-1, 1), timestamps=t).ravel()
     assert not np.any(np.isnan(infilled)), "Imputer left NaNs in the output"
+    
+    # Verify imputed values match ground truth in the gap region
+    gap_slice = slice(30, 50)
+    np.testing.assert_allclose(infilled[gap_slice], np.sin(t[gap_slice]), rtol=1e-2, atol=1e-2)
     
     # Calculate first and second derivatives numerically
     dx = np.diff(infilled)

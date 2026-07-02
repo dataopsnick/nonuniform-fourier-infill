@@ -35,6 +35,9 @@ class TransformationTracker:
         self.log_path = os.path.realpath(log_path)
         self.history_dir = os.path.realpath(history_dir)
         self._lock = threading.RLock()
+        # NOTE: This lock is thread-safe only. Concurrent processes sharing the same
+        # log/history paths will corrupt files. Use file locking or dedicated IPC
+        # if cross-process safety is required.
         
         with self._lock:
             try:
@@ -94,9 +97,14 @@ class TransformationTracker:
                     # Old format: ver_{timestamp}_{step_name}.csv
                     if len(parts) >= 4 and re.match(r'^[0-9a-f]{8}$', parts[2]):
                         version_id = f"{parts[0]}_{parts[1]}_{parts[2]}"
+                        # Validate that the version_id matches the expected pattern
+                        if not re.match(r'^ver_\d+_[0-9a-f]{8}$', version_id):
+                            continue  # skip files with ambiguous names
                         step_name = "_".join(parts[3:]).replace(".csv", "")
                     elif len(parts) >= 3:
                         version_id = f"{parts[0]}_{parts[1]}"
+                        if not re.match(r'^ver_\d+$', version_id):
+                            continue
                         step_name = "_".join(parts[2:]).replace(".csv", "")
                     else:
                         version_id = parts[0]
@@ -138,7 +146,11 @@ class TransformationTracker:
                     "version_id": version_id,
                     "step_name": target["step_name"]
                 }
-                self.log_transformation(log_entry)
+                try:
+                    self.log_transformation(log_entry)
+                except TransformationLoggingError:
+                    # Log failure is non-fatal; the reverted DataFrame is still valid.
+                    pass
                 return df
             except Exception as e:
                 raise TransformationLoggingError(f"Failed to load or log reverted version {version_id}: {e}")
@@ -202,6 +214,11 @@ def impute_dataframe(
     diagnostics : dict
         Rich diagnostic metadata dictionary.
     """
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("df must be a pandas DataFrame")
+    if df.empty:
+        raise ValueError("df cannot be empty")
+
     tracker = TransformationTracker(log_path=log_path, history_dir=history_dir)
     
     # Take snapshot of original data
@@ -209,6 +226,10 @@ def impute_dataframe(
 
     df_copy = df.copy()
     if time_col is not None:
+        if time_col not in df_copy.columns:
+            raise KeyError(
+                f"time_col '{time_col}' not found in DataFrame columns: {list(df_copy.columns)}"
+            )
         df_copy = df_copy.set_index(time_col)
 
     if not pd.api.types.is_numeric_dtype(df_copy.index):
@@ -228,6 +249,15 @@ def impute_dataframe(
                 if np.can_cast(numeric_idx, np.int64, casting='safe'):
                     df_copy.index = numeric_idx.astype(np.int64)
                 else:
+                    # float64 can lose precision for integers > 2^53.
+                    # Consider normalising timestamps (e.g., t - t[0]) for large values.
+                    if np.issubdtype(numeric_idx.dtype, np.integer) and numeric_idx.max() > 2**53:
+                        import warnings
+                        warnings.warn(
+                            "Timestamp values exceed 2^53; float64 conversion may lose precision. "
+                            "Consider normalising timestamps or using a smaller unit.",
+                            UserWarning
+                        )
                     df_copy.index = numeric_idx.astype(np.float64)
         except Exception:
             raise TypeError(
@@ -262,8 +292,26 @@ def impute_dataframe(
         tol=tol
     )
 
-    imputer.fit(df_copy, timestamps=timestamps)
-    infilled_df = imputer.transform(df_copy, timestamps=timestamps, stochastic=stochastic, stochastic_scale=stochastic_scale)
+    try:
+        imputer.fit(df_copy, timestamps=timestamps)
+        infilled_df = imputer.transform(df_copy, timestamps=timestamps, stochastic=stochastic, stochastic_scale=stochastic_scale)
+    except Exception:
+        tracker.log_transformation({
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "event": "infilled_dataframe_failed",
+            "pre_infill_version": pre_ver,
+            "parameters": {
+                "method": method,
+                "device": str(device),
+                "n_frequencies": n_frequencies,
+                "alpha": alpha,
+                "solver": solver,
+                "covariance_compensation": covariance_compensation,
+                "stochastic": stochastic,
+                "stochastic_scale": stochastic_scale
+            }
+        })
+        raise
 
     # Restore the epoch after transform to map back to original unshifted index
     if epoch != 0.0:
@@ -303,8 +351,14 @@ def impute_dataframe(
         opt_alpha = imputer.alphas_[col_idx] if col_idx < len(imputer.alphas_) else 1e-4
         n_f = imputer.n_frequencies_[col_idx] if col_idx < len(imputer.n_frequencies_) else len(col_data)
 
+        if len(v_timestamps) > 1:
+            # Ensure sorted before computing sampling intervals
+            if not np.all(np.diff(v_timestamps) >= 0):
+                sort_idx = np.argsort(v_timestamps)
+                v_timestamps = v_timestamps[sort_idx]
+                v_data = v_data[sort_idx]
         p_n = np.diff(v_timestamps) if len(v_timestamps) > 1 else [1.0]
-        min_p = np.nanmin(p_n) if len(p_n) > 0 and np.nanmin(p_n) > 0 else 1.0
+        min_p = np.min(p_n[p_n > 0]) if (isinstance(p_n, np.ndarray) and np.any(p_n > 0)) or (isinstance(p_n, list) and any(x > 0 for x in p_n)) else 1.0
         max_sampling_rate = 1.0 / min_p
         nyquist_frequency = max_sampling_rate / 2.0
         f_k = np.linspace(0, nyquist_frequency, n_f)

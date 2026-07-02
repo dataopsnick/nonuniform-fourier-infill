@@ -38,6 +38,20 @@ class NufiImputer(BaseEstimator, TransformerMixin):
         self.alphas_ = []
         self.n_frequencies_ = []
         
+    def clone(self):
+        """Returns a fresh unfitted clone of this imputer with the same parameters."""
+        return NufiImputer(
+            method=self.method,
+            device=self.device,
+            covariance_compensation=self.covariance_compensation,
+            n_frequencies=self.n_frequencies,
+            alpha=self.alpha,
+            solver=self.solver,
+            max_iter=self.max_iter,
+            tol=self.tol,
+            random_state=self.random_state
+        )
+
     def fit(self, X, y=None, timestamps=None):
         """
         Fits the imputer on X. If X is a Pandas DataFrame, the index is used as timestamps
@@ -87,8 +101,14 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             best_alpha = self.alpha if isinstance(self.alpha, (int, float)) else 1e-4
             best_gcv = float('inf')
             
+            if len(v_timestamps) > 1:
+                # Ensure sorted before computing sampling intervals
+                if not np.all(np.diff(v_timestamps) >= 0):
+                    sort_idx = np.argsort(v_timestamps)
+                    v_timestamps = v_timestamps[sort_idx]
+                    v_data = v_data[sort_idx]
             p_n = np.diff(v_timestamps)
-            min_p = np.nanmin(p_n) if len(p_n) > 0 and np.nanmin(p_n) > 0 else 1.0
+            min_p = np.min(p_n[p_n > 0]) if np.any(p_n > 0) else 1.0
             max_sampling_rate = 1.0 / min_p
             nyquist_frequency = max_sampling_rate / 2.0
             
@@ -226,8 +246,14 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             alpha = self.alphas_[col_idx] if col_idx < len(self.alphas_) else (self.alpha if isinstance(self.alpha, (int, float)) else 1e-4)
             n_f = self.n_frequencies_[col_idx] if col_idx < len(self.n_frequencies_) else (self.n_frequencies if isinstance(self.n_frequencies, int) else len(X_data))
             
+            if len(v_timestamps) > 1:
+                # Ensure sorted before computing sampling intervals
+                if not np.all(np.diff(v_timestamps) >= 0):
+                    sort_idx = np.argsort(v_timestamps)
+                    v_timestamps = v_timestamps[sort_idx]
+                    v_data = v_data[sort_idx]
             p_n = np.diff(v_timestamps)
-            min_p = np.nanmin(p_n) if len(p_n) > 0 and np.nanmin(p_n) > 0 else 1.0
+            min_p = np.min(p_n[p_n > 0]) if np.any(p_n > 0) else 1.0
             max_sampling_rate = 1.0 / min_p
             nyquist_frequency = max_sampling_rate / 2.0
             f_k = np.linspace(0, nyquist_frequency, n_f)

@@ -65,9 +65,9 @@ class TestAgentNativeLayer(unittest.TestCase):
         self.assertTrue(any("post_infill" in f for f in csv_files))
 
     def test_impute_dataframe_empty(self):
-        """Edge case: empty DataFrame should raise TypeError."""
+        """Edge case: empty DataFrame should raise ValueError."""
         empty_df = pd.DataFrame(columns=["timestamp", "signal"])
-        with self.assertRaises(TypeError):
+        with self.assertRaises(ValueError):
             impute_dataframe(empty_df, time_col="timestamp")
 
     def test_impute_dataframe_all_nan(self):
@@ -106,7 +106,13 @@ class TestAgentNativeLayer(unittest.TestCase):
         """Edge case: specified time column is not numeric / index is not numeric."""
         bad_df = pd.DataFrame({"signal": [1.0, 2.0]}, index=["a", "b"])
         with self.assertRaises(TypeError):
-            impute_dataframe(bad_df)
+            impute_dataframe(bad_df, time_col=None)
+
+    def test_impute_dataframe_non_dataframe_input(self):
+        """Edge case: non-DataFrame input should raise TypeError."""
+        for invalid in [{"timestamp": [1, 2]}, [1, 2, 3], None]:
+            with self.assertRaises(TypeError):
+                impute_dataframe(invalid)
 
     def test_tracker_logging(self):
         tracker = TransformationTracker(log_path=self.test_log, history_dir=self.test_history)

@@ -50,7 +50,8 @@ ext_compiler_args = []
 ext_linker_args = []
 ext_include_dirs = [np.get_include()]
 
-if "NUIFI_NO_OPENMP" in os.environ:
+_nuifi_no_openmp = os.environ.get("NUIFI_NO_OPENMP", "").lower()
+if _nuifi_no_openmp in ("1", "true", "yes", "on"):
     ext_compiler_args = []
     ext_linker_args = []
 else:
@@ -109,8 +110,12 @@ else:
             res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             if res.returncode == 0:
                 has_openmp = True
-        except Exception:
-            pass
+        except subprocess.SubprocessError as e:
+            import warnings
+            warnings.warn(f"OpenMP detection failed (compiler error): {e}. OpenMP disabled.")
+        except (OSError, IOError) as e:
+            import warnings
+            warnings.warn(f"OpenMP detection failed (I/O error): {e}. OpenMP disabled.")
         finally:
             if tmpdir is not None:
                 try:
@@ -141,7 +146,7 @@ setup(
     name="nufi",
     version="0.1.0",
     packages=["nufi", "nufi.kernels"],
-    ext_modules=cythonize(extensions, compiler_directives={"language_level": "3"}),
+    ext_modules=cythonize(extensions, compiler_directives={"language_level": 3}),
     python_requires=">=3.9",
     install_requires=[
         "numpy>=1.20.0",

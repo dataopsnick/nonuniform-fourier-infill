@@ -2,7 +2,7 @@ import pandas as pd
 import numpy as np
 from nufi.impute import NufiImputer
 
-def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False):
+def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False, sort=True):
     """
     Infill a standard single-index or column-based Pandas / cuDF DataFrame.
     If cuDF is detected, handles GPU memory transfer seamlessly.
@@ -29,6 +29,8 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False):
         Note: When keep_time_col=True, the time column is duplicated as both the DataFrame index
         and a regular feature column. The imputer will fit/transform it like any other column,
         which may distort covariance estimation if timestamp values differ in scale.
+    sort : bool, default True
+        Whether to sort by the time column or index before calling fit_transform.
     """
     try:
         import cudf
@@ -45,6 +47,17 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False):
     if imputer is None:
         imputer = NufiImputer()
         
+    # Sort by time to ensure proper chronological order for frequency estimation
+    if sort:
+        if time_col is not None:
+            if time_col not in pd_df.columns:
+                raise ValueError(
+                    f"time_col '{time_col}' not found in DataFrame columns: {list(pd_df.columns)}"
+                )
+            pd_df = pd_df.sort_values(time_col)
+        else:
+            pd_df = pd_df.sort_index()
+
     # If a specific column is defined as time, set it as index
     if time_col is not None:
         if time_col not in pd_df.columns:
@@ -88,6 +101,13 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False):
             f"Imputer returned {len(infilled_pd)} rows, "
             f"expected {len(pd_df)}. "
             "The NufiImputer must preserve row count."
+        )
+    
+    # Verify row order before continuing
+    if not np.array_equal(infilled_pd.index, pd_df.index):
+        raise ValueError(
+            "NufiImputer.fit_transform reordered rows. "
+            "Row order must be preserved."
         )
     
     if is_cudf:
@@ -186,8 +206,11 @@ def infill_multiindex_dataframe(df, imputer=None, entity_level=0, time_level=1, 
         temp_df = group_sorted.copy()
         temp_df.index = timestamps
         
+        # Use a fresh imputer per group to avoid cross-group contamination
+        group_imputer = NufiImputer() if imputer is None else imputer.clone()
+        
         try:
-            infilled_temp = imputer.fit_transform(temp_df)
+            infilled_temp = group_imputer.fit_transform(temp_df)
         except Exception as e:
             entity_id = group_sorted.index.get_level_values(entity_level)[0]
             raise RuntimeError(
@@ -199,6 +222,13 @@ def infill_multiindex_dataframe(df, imputer=None, entity_level=0, time_level=1, 
                 f"Imputer returned {len(infilled_temp)} rows, "
                 f"expected {len(group_sorted)}. "
                 "The NufiImputer must preserve row count."
+            )
+        
+        # Verify row order before restoring index
+        if not np.array_equal(infilled_temp.index, temp_df.index):
+            raise ValueError(
+                "NufiImputer.fit_transform reordered rows. "
+                "Row order must be preserved for correct index restoration."
             )
         
         # Restore MultiIndex structure

@@ -45,19 +45,10 @@ def generate_benchmark_data(n_samples: int = 200, n_channels: int = 3, missing_r
     mask = np.random.rand(n_samples, n_channels) < missing_rate
     masked_data[mask] = np.nan
     
-    # Ensure first and last values are not NaN using only masked data (no ground-truth leak!)
-    for c in range(n_channels):
-        col = masked_data[:, c]
-        valid_idx = np.where(~np.isnan(col))[0]
-        if len(valid_idx) == 0:
-            raise ValueError(f"Channel {c} has no valid observations — cannot benchmark with entirely NaN channel. "
-                             f"Consider increasing n_samples or reducing missing_rate.")
-        # NOTE: Patching boundary NaNs gives all methods free extrapolation —
-        #       this may inflate scores for spline/MICE/GP that cannot handle edge NaNs.
-        if np.isnan(col[0]):
-            col[0] = col[valid_idx[0]]
-        if np.isnan(col[-1]):
-            col[-1] = col[valid_idx[-1]]
+    # NOTE: Boundary filling intentionally skipped to avoid biasing benchmarks.
+    # If a method requires non-NaN endpoints (e.g., cubic spline), handle it
+    # inside that method's try-block only.
+    pass
             
     df_truth = pd.DataFrame(ground_truth, index=timestamps, columns=[f"ch_{i}" for i in range(n_channels)])
     df_masked = pd.DataFrame(masked_data, index=timestamps, columns=[f"ch_{i}" for i in range(n_channels)])
@@ -77,11 +68,15 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
     start = time.time()
     nufi = NufiImputer(device='cpu', covariance_compensation=True, n_frequencies='auto', alpha='auto', random_state=42)
     try:
-        nufi_infilled = nufi.fit_transform(df_masked, timestamps=timestamps)
+        # timestamps are already the DataFrame index; do not pass duplicate kwarg
+        nufi_infilled = nufi.fit_transform(df_masked)
         nufi_time = time.time() - start
         
         nufi_rmse = np.sqrt(np.mean((df_truth.to_numpy() - nufi_infilled.to_numpy()) ** 2))
-        nufi_cov_err = np.linalg.norm(true_cov - nufi_infilled.cov().to_numpy(), ord='fro')
+        try:
+            nufi_cov_err = np.linalg.norm(true_cov - nufi_infilled.cov().to_numpy(), ord='fro')
+        except (ValueError, np.linalg.LinAlgError):
+            nufi_cov_err = float('nan')
         
         results["NUFI"] = {
             "RMSE": float(nufi_rmse),
@@ -108,7 +103,10 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
         spline_time = time.time() - start
         
         spline_rmse = np.sqrt(np.mean((df_truth.to_numpy() - spline_infilled.to_numpy()) ** 2))
-        spline_cov_err = np.linalg.norm(true_cov - spline_infilled.cov().to_numpy(), ord='fro')
+        try:
+            spline_cov_err = np.linalg.norm(true_cov - spline_infilled.cov().to_numpy(), ord='fro')
+        except (ValueError, np.linalg.LinAlgError):
+            spline_cov_err = float('nan')
         
         results["Cubic Spline"] = {
             "RMSE": float(spline_rmse),
@@ -135,7 +133,10 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
             
             mice_rmse = np.sqrt(np.mean((df_truth.to_numpy() - mice_infilled_data) ** 2))
             mice_infilled_df = pd.DataFrame(mice_infilled_data, columns=df_truth.columns)
-            mice_cov_err = np.linalg.norm(true_cov - mice_infilled_df.cov().to_numpy(), ord='fro')
+            try:
+                mice_cov_err = np.linalg.norm(true_cov - mice_infilled_df.cov().to_numpy(), ord='fro')
+            except (ValueError, np.linalg.LinAlgError):
+                mice_cov_err = float('nan')
             
             results["MICE"] = {
                 "RMSE": float(mice_rmse),
@@ -153,24 +154,36 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
     if GP_AVAILABLE:
         start = time.time()
         try:
-            gp_infilled_data = np.zeros_like(df_truth.to_numpy())
-            for c in range(n_channels):
-                col_data = df_masked.to_numpy()[:, c]
-                valid = ~np.isnan(col_data)
-                
-                gp = GaussianProcessRegressor(
-                    kernel=RBF(length_scale=np.ptp(timestamps) / np.sqrt(len(timestamps))),
-                    alpha=0.1,
-                    random_state=42,
-                    n_restarts_optimizer=3
-                )
-                gp.fit(timestamps[valid].reshape(-1, 1), col_data[valid])
-                gp_infilled_data[:, c] = gp.predict(timestamps.reshape(-1, 1))
-                
-            gp_time = time.time() - start
+            n_valid_max = max((~np.isnan(df_masked.to_numpy()[:, c])).sum() for c in range(n_channels))
+            if n_valid_max > 500:
+                results["Gaussian Process"] = {"Status": f"Skipped: too many valid points ({n_valid_max}) for O(n³) GP"}
+            else:
+                gp_infilled_data = np.zeros_like(df_truth.to_numpy())
+                for c in range(n_channels):
+                    col_data = df_masked.to_numpy()[:, c]
+                    valid = ~np.isnan(col_data)
+                    n_valid = valid.sum()
+                    if n_valid < 2:
+                        # Not enough observations to fit a GP; fill with column mean or NaN
+                        gp_infilled_data[:, c] = np.nanmean(col_data) if n_valid > 0 else 0.0
+                        continue
+                    
+                    gp = GaussianProcessRegressor(
+                        kernel=RBF(length_scale=np.ptp(timestamps) / np.sqrt(len(timestamps))),
+                        alpha=0.1,
+                        random_state=42,
+                        n_restarts_optimizer=3
+                    )
+                    gp.fit(timestamps[valid].reshape(-1, 1), col_data[valid])
+                    gp_infilled_data[:, c] = gp.predict(timestamps.reshape(-1, 1))
+                    
+                gp_time = time.time() - start
             gp_rmse = np.sqrt(np.mean((df_truth.to_numpy() - gp_infilled_data) ** 2))
             gp_infilled_df = pd.DataFrame(gp_infilled_data, columns=df_truth.columns)
-            gp_cov_err = np.linalg.norm(true_cov - gp_infilled_df.cov().to_numpy(), ord='fro')
+            try:
+                gp_cov_err = np.linalg.norm(true_cov - gp_infilled_df.cov().to_numpy(), ord='fro')
+            except (ValueError, np.linalg.LinAlgError):
+                gp_cov_err = float('nan')
             
             results["Gaussian Process"] = {
                 "RMSE": float(gp_rmse),
