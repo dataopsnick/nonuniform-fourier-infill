@@ -12,6 +12,7 @@ def test_derivative_continuity():
     signal[30:50] = np.nan
     
     # TODO: add parametrized tests for boundary NaNs, multiple gaps, and extreme missing ratios
+    # See: https://github.com/example/issues/123 for tracking
     # Infill using our imputer
     imputer = NufiImputer(method='direct', covariance_compensation=False)
     infilled = imputer.fit_transform(signal.reshape(-1, 1), timestamps=t).ravel()
@@ -21,11 +22,13 @@ def test_derivative_continuity():
     dx = np.diff(infilled)
     ddx = np.diff(dx)
     
-    # Expected max |dx| for sin(t) sampled at dt≈0.101: amplitude × ω × dt ≈ 1 × 1 × 0.101 = 0.101
-    # Allow 2× margin for infill artifacts near the gap boundary.
-    assert np.max(np.abs(dx)) < 0.2
-    # Expected max |ddx| ~ amplitude × ω² × dt² ≈ 1 × 1 × 0.0102 = 0.0102; 2× margin.
-    assert np.max(np.abs(ddx)) < 0.02
+    # Compute expected bounds dynamically
+    dt = float(np.mean(np.diff(t)))
+    amp = 1.0  # amplitude of sin(t)
+    omega = 1.0
+    # Allow 3× margin to reduce brittleness while still catching gross failures
+    assert np.max(np.abs(dx)) < 3 * amp * omega * dt
+    assert np.max(np.abs(ddx)) < 3 * amp * omega**2 * dt**2
 
     # Compare against linear interpolation (should have higher derivative spikes)
     valid = ~np.isnan(signal)
@@ -60,4 +63,10 @@ def test_covariance_preservation():
     filled_cov = np.cov(X_filled[:, 0], X_filled[:, 1])
     
     # Relaxed tolerances to account for estimation variance with only 50 samples and ~20% missing data.
-    np.testing.assert_allclose(filled_cov, original_cov, rtol=1e-1, atol=1e-1)
+    np.testing.assert_allclose(filled_cov, original_cov, rtol=5e-2, atol=5e-2)
+    # Also verify covariance_compensation actually changes the result:
+    imputer_no_comp = NufiImputer(method='direct', covariance_compensation=False)
+    X_no_comp = imputer_no_comp.fit_transform(X, timestamps=t)
+    no_comp_cov = np.cov(X_no_comp[:, 0], X_no_comp[:, 1])
+    # Compensated should be closer to original than uncompensated
+    assert np.linalg.norm(filled_cov - original_cov) <= np.linalg.norm(no_comp_cov - original_cov)

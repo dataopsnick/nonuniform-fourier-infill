@@ -65,7 +65,7 @@ class TestAgentNativeLayer(unittest.TestCase):
         self.assertTrue(any("post_infill" in f for f in csv_files))
 
     def test_impute_dataframe_empty(self):
-        """Edge case: empty DataFrame should raise or return gracefully."""
+        """Edge case: empty DataFrame should raise TypeError."""
         empty_df = pd.DataFrame(columns=["timestamp", "signal"])
         with self.assertRaises(TypeError):
             impute_dataframe(empty_df, time_col="timestamp")
@@ -82,7 +82,9 @@ class TestAgentNativeLayer(unittest.TestCase):
         )
         self.assertTrue(result_df["signal"].isna().all())
         self.assertIn("signal", diagnostics)
-        self.assertIn("NO_OBSERVATIONS", diagnostics["signal"]["stability_flags"])
+        flags = diagnostics["signal"]["stability_flags"]
+        self.assertIsInstance(flags, list)
+        self.assertIn("NO_OBSERVATIONS", flags)
 
     def test_impute_dataframe_no_nans(self):
         """Edge case: DataFrame with no missing values."""
@@ -97,7 +99,7 @@ class TestAgentNativeLayer(unittest.TestCase):
 
     def test_impute_dataframe_missing_time_col(self):
         """Edge case: specified time column does not exist."""
-        with self.assertRaises((KeyError, ValueError)):
+        with self.assertRaises(KeyError):
             impute_dataframe(self.df, time_col="nonexistent")
 
     def test_impute_dataframe_non_numeric_index(self):
@@ -153,7 +155,7 @@ class TestAgentNativeLayer(unittest.TestCase):
         )
         
         # Test plot rendering with show_plot=False to avoid blocking tests
-        save_img = "test_diagnostics_plot.png"
+        save_img = os.path.join(self._tmpdir, "test_diagnostics_plot.png")
         if os.path.exists(save_img):
             os.remove(save_img)
             
