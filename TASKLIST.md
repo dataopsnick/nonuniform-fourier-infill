@@ -13,7 +13,7 @@ solve_tikhonov_nudft, etc.) should be re-exported here for a consistent and conv
 API.
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>2</id>
     <title>benchmark.py:158-181 - Bug: UnboundLocalError when GP benchmark is skipped.</title>
     <description><![CDATA[
@@ -499,7 +499,7 @@ does.
                   raise TransformationLoggingError(f"Failed to write to transformation log: {e}")
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>18</id>
     <title>agent.py:295-314 - Exception masking: original error can be lost during failure logging.</title>
     <description><![CDATA[
@@ -940,7 +940,7 @@ monotonicity error. Prefer computing diffs directly on the integer representatio
                   )
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>34</id>
     <title>wrappers.py:106-111 - np.array_equal returns False when either index contai...</title>
     <description><![CDATA[
