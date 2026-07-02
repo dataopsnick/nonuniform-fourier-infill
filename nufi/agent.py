@@ -15,6 +15,9 @@ class TransformationLoggingError(Exception):
     """Custom exception raised when writing to the transformation log or history fails."""
     pass
 
+_FILE_LOCKS = {}
+_FILE_LOCKS_LOCK = threading.Lock()
+
 class TransformationTracker:
     """
     Manages append-only transformation logging and snapshot-based dataframe version tracking.
@@ -34,7 +37,12 @@ class TransformationTracker:
         # Store resolved paths (these are canonical and safe for writes)
         self.log_path = os.path.realpath(log_path)
         self.history_dir = os.path.realpath(history_dir)
-        self._lock = threading.RLock()
+        
+        with _FILE_LOCKS_LOCK:
+            key = (self.log_path, self.history_dir)
+            if key not in _FILE_LOCKS:
+                _FILE_LOCKS[key] = threading.RLock()
+            self._lock = _FILE_LOCKS[key]
         # NOTE: This lock is thread-safe only. Concurrent processes sharing the same
         # log/history paths will corrupt files. Use file locking or dedicated IPC
         # if cross-process safety is required.
@@ -79,6 +87,11 @@ class TransformationTracker:
             try:
                 self.log_transformation(log_entry)
             except Exception as e:
+                # Clean up orphaned CSV to keep history consistent
+                try:
+                    os.remove(filepath)
+                except OSError:
+                    pass
                 raise TransformationLoggingError(f"Failed to write to transformation log: {e}")
         return version_id
 
@@ -221,6 +234,9 @@ def impute_dataframe(
         raise TypeError("df must be a pandas DataFrame")
     if df.empty:
         raise ValueError("df cannot be empty")
+    if time_col is not None and list(df.columns).count(time_col) > 1:
+        raise ValueError(f"time_col '{time_col}' appears multiple times in DataFrame columns. "
+                         f"Ensure column names are unique.")
 
     tracker = TransformationTracker(log_path=log_path, history_dir=history_dir)
     
@@ -330,9 +346,6 @@ def impute_dataframe(
     # Generate JSON diagnostic metadata and column details
     diagnostics = {}
     dev = get_device(device)
-    if time_col is not None and list(df.columns).count(time_col) > 1:
-        raise ValueError(f"time_col '{time_col}' appears multiple times in DataFrame columns. "
-                         f"Ensure column names are unique.")
     columns = [c for c in df.columns if c != time_col]
     total_infilled_nans = int(df_copy[columns].isna().sum().sum())
 
@@ -374,6 +387,8 @@ def impute_dataframe(
             reconstructed_np = imputer.reconstructed_[col_idx][valid_mask]
             F_np = imputer.coefficients_[col_idx]
         else:
+            # WARNING: fallback PSD does NOT apply covariance compensation.
+            # SNR/entropy/flags may differ from the actual compensated imputation.
             F = solve_tikhonov_nudft(
                 v_timestamps, v_data, f_k, opt_alpha,
                 solver=solver, max_iter=max_iter, tol=tol, device=device

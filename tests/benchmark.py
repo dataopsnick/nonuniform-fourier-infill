@@ -66,8 +66,8 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
     # 1. NUFI Imputer (Our Library)
     # ==========================================
     start = time.time()
-    nufi = NufiImputer(device='cpu', covariance_compensation=True, n_frequencies='auto', alpha='auto', random_state=42)
     try:
+        nufi = NufiImputer(device='cpu', covariance_compensation=True, n_frequencies='auto', alpha='auto', random_state=42)
         # timestamps are already the DataFrame index; do not pass duplicate kwarg
         nufi_infilled = nufi.fit_transform(df_masked)
         nufi_time = time.time() - start
@@ -98,8 +98,8 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
         remaining_nan = spline_infilled.isna().sum().sum()
         if remaining_nan > 0:
             print(f"[WARN] Cubic spline left {remaining_nan} NaN(s) — results may be degraded by fallback")
-        # Fallback: use linear, then ffill/bfill to ensure no NaN left
-        spline_infilled = spline_infilled.interpolate(method='linear', axis=0).ffill().bfill()
+            # Fallback: use linear, then ffill/bfill to ensure no NaN left
+            spline_infilled = spline_infilled.interpolate(method='linear', axis=0).ffill().bfill()
         spline_time = time.time() - start
         
         spline_rmse = np.sqrt(np.mean((df_truth.to_numpy() - spline_infilled.to_numpy()) ** 2))

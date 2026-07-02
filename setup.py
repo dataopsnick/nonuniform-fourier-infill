@@ -4,7 +4,11 @@ import subprocess
 import tempfile
 import shutil
 import sysconfig
-from packaging.version import Version
+import warnings
+
+def parse_version(v_str):
+    clean_v = "".join(c if c.isdigit() or c == "." else "" for c in v_str.split("-")[0].split("+")[0])
+    return tuple(map(int, [p for p in clean_v.split(".") if p]))
 
 # Task 8: Check for build-time dependencies
 try:
@@ -24,7 +28,7 @@ except ImportError:
         "Install it via: pip install cython>=3.0.0"
     )
 else:
-    if Version(cython_version) < Version("3.0.0"):
+    if parse_version(cython_version) < (3, 0, 0):
         raise ImportError(
             f"Cython >= 3.0.0 is required, but {cython_version} is installed. "
             "Upgrade via: pip install cython>=3.0.0"
@@ -39,7 +43,7 @@ except ImportError:
         "Install it via: pip install numpy>=1.20.0"
     )
 else:
-    if Version(numpy_version) < Version("1.20.0"):
+    if parse_version(numpy_version) < (1, 20, 0):
         raise ImportError(
             f"NumPy >= 1.20.0 is required, but {numpy_version} is installed. "
             "Upgrade via: pip install numpy>=1.20.0"
@@ -77,8 +81,11 @@ else:
             if candidate and os.path.isdir(os.path.join(candidate, "include")):
                 # Ensure we have omp.h to avoid matching sys.prefix false positives
                 if os.path.exists(os.path.join(candidate, "include", "omp.h")):
-                    libomp_path = candidate
-                    break
+                    lib_dir = os.path.join(candidate, "lib")
+                    lib_name = "libomp.dylib" if sys.platform == "darwin" else "libomp.so"
+                    if os.path.exists(os.path.join(lib_dir, lib_name)):
+                        libomp_path = candidate
+                        break
         if libomp_path:
             ext_compiler_args = ["-Xpreprocessor", "-fopenmp"]
             ext_linker_args = [
@@ -88,7 +95,6 @@ else:
             ]
             ext_include_dirs.append(os.path.join(libomp_path, "include"))
         else:
-            import warnings
             warnings.warn(
                 "OpenMP not found. Install libomp via 'brew install libomp' "
                 "or set the LIBOMP_ROOT environment variable to the libomp prefix. "
@@ -111,10 +117,8 @@ else:
             if res.returncode == 0:
                 has_openmp = True
         except subprocess.SubprocessError as e:
-            import warnings
             warnings.warn(f"OpenMP detection failed (compiler error): {e}. OpenMP disabled.")
         except (OSError, IOError) as e:
-            import warnings
             warnings.warn(f"OpenMP detection failed (I/O error): {e}. OpenMP disabled.")
         finally:
             if tmpdir is not None:
@@ -127,8 +131,10 @@ else:
             ext_compiler_args = ["-fopenmp"]
             ext_linker_args = ["-fopenmp"]
         else:
-            import warnings
-            warnings.warn("OpenMP not supported by compiler, disabling.")
+            warnings.warn(
+                f"OpenMP test compilation failed (returncode={res.returncode if 'res' in locals() else 'N/A'}). "
+                f"Compiler stderr: {res.stderr.decode().strip() if 'res' in locals() else 'N/A'}. OpenMP disabled."
+            )
             ext_compiler_args = []
             ext_linker_args = []
 

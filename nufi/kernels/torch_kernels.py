@@ -16,7 +16,7 @@ def get_device(device_str=None):
     else:
         return torch.device("cpu")
 
-def compute_ND_NUDFT(X_list, device=None):
+def compute_ND_NUDFT(X_list, device=None, nyquist_frequency=None):
     """
     Computes the 1D Non-Uniform Discrete Fourier Transform (NUDFT) for each
     multidimensional signal in X_list using PyTorch acceleration.
@@ -44,26 +44,29 @@ def compute_ND_NUDFT(X_list, device=None):
         v_data = data[valid_mask]
 
         N = len(data)
-        # Estimate Nyquist frequency from median sampling interval to prevent numerical overflow
-        if len(v_timestamps) > 1:
-            # Sort to ensure positive diffs
-            sort_idx = np.argsort(v_timestamps)
-            sorted_ts = v_timestamps[sort_idx]
-            p_n = np.diff(sorted_ts)
-            p_n = p_n[p_n > 0]  # keep only positive intervals
-            if len(p_n) > 0:
-                median_p = np.median(p_n)
-                nyquist_frequency = 0.5 / max(median_p, 1e-12)
+        # Use caller-provided Nyquist if available, otherwise estimate from sampling
+        if nyquist_frequency is None:
+            if len(v_timestamps) > 1:
+                # Sort to ensure positive diffs
+                sort_idx = np.argsort(v_timestamps)
+                sorted_ts = v_timestamps[sort_idx]
+                p_n = np.diff(sorted_ts)
+                p_n = p_n[p_n > 0]  # keep only positive intervals
+                if len(p_n) > 0:
+                    median_p = np.median(p_n)
+                    estimated_nyquist = 0.5 / max(median_p, 1e-12)
+                else:
+                    import warnings
+                    warnings.warn("Cannot estimate Nyquist frequency; all sampling intervals are zero or negative. Defaulting to 1.0.")
+                    estimated_nyquist = 1.0
             else:
                 import warnings
-                warnings.warn("Cannot estimate Nyquist frequency; all sampling intervals are zero or negative. Defaulting to 1.0.")
-                nyquist_frequency = 1.0
+                warnings.warn("Only one valid sample; cannot estimate Nyquist frequency. Defaulting to 1.0.")
+                estimated_nyquist = 1.0
         else:
-            import warnings
-            warnings.warn("Only one valid sample; cannot estimate Nyquist frequency. Defaulting to 1.0.")
-            nyquist_frequency = 1.0
+            estimated_nyquist = nyquist_frequency
 
-        f_k = torch.linspace(0, nyquist_frequency, N, dtype=torch.float64, device=dev)
+        f_k = torch.linspace(0, estimated_nyquist, N, dtype=torch.float64, device=dev)
 
         # Standard NUDFT: A[n,k] = exp(-2πi * t_n * f_k), then sum over n
         t_timestamps = torch.tensor(v_timestamps, dtype=torch.float64, device=dev)
@@ -117,6 +120,7 @@ def compute_Fast_ND_NUDFT(X_list, device=None):
         # Generate uniform grid using min/max of valid timestamps
         t_min, t_max = np.min(v_timestamps), np.max(v_timestamps)
         uniform_grid = np.linspace(t_min, t_max, N)
+        uniform_grid = np.clip(uniform_grid, t_min, t_max)
         # Ensure timestamps are sorted for np.interp (requires monotonic increasing)
         if not np.all(np.diff(v_timestamps) >= 0):
             sort_idx = np.argsort(v_timestamps)
@@ -144,6 +148,13 @@ def covariance_compensation(X_list, device=None):
 
     # Step 2: Flatten & stack the data (preserving phase information)
     # Move to CPU for covariance and LDL^T since scipy/pandas functions are optimized there
+    # Validate equal signal lengths before stacking
+    lens = [len(tensor) for tensor in X_k_result]
+    if len(set(lens)) > 1:
+        raise ValueError(
+            f"All signals must have the same length, got lengths {lens}. "
+            f"Signals of different lengths cannot be covariance-compensated."
+        )
     flat_data = []
     for tensor in X_k_result:
         arr = tensor.cpu().numpy()
@@ -180,7 +191,7 @@ def covariance_compensation(X_list, device=None):
     # Regularize to ensure positive-definiteness for LDL^T
     # Scale epsilon relative to the matrix magnitude for robustness
     diag_mean = np.mean(np.diag(covariance_matrix))
-    eps = max(1e-10 * diag_mean, 1e-15) if diag_mean > 0 else 1e-10
+    eps = max(1e-10 * max(diag_mean, 0.0), 1e-10)
     covariance_matrix = covariance_matrix + eps * np.eye(covariance_matrix.shape[0])
 
     # Step 4: Perform LDL^T decomposition
@@ -190,7 +201,9 @@ def covariance_compensation(X_list, device=None):
     except Exception:
         raise ValueError("LDL decomposition failed; covariance matrix may be singular.")
 
-    return lu, d, perm, valid_idx  # returns covariance-matrix indices (length up to 2*M); caller must map to signal space via // 2
+    return lu, d, perm, valid_idx  # valid_idx: indices into the full (pre-drop) covariance matrix.
+    # Caller must map back to signal space: signal_idx = valid_idx // 2
+    # and to real/imag component: component = valid_idx % 2  (0=real, 1=imag)
 
 def solve_cg(A, b, alpha, max_iter=100, tol=1e-5):
     """
@@ -307,6 +320,13 @@ def solve_tikhonov_nudft(timestamps, data, f_k, alpha, solver='direct', max_iter
     
     # Build Fourier mapping matrix A: shape (N, M)
     # A_nk = exp(2*pi*i * f_k * t_n)
+    N, M = len(t_timestamps), len(t_f_k)
+    MAX_ELEMENTS = 50_000_000  # ~800 MB for complex128
+    if N * M > MAX_ELEMENTS and solver != 'cg':
+        raise ValueError(
+            f"Matrix A shape ({N},{M}) has {N*M} elements; exceeds memory safety limit. "
+            f"Use solver='cg' to avoid materializing the full matrix."
+        )
     exponent = 2.0j * np.pi * t_timestamps.unsqueeze(1) * t_f_k.unsqueeze(0)
     A = torch.exp(exponent)
     

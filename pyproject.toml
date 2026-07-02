@@ -23,15 +23,13 @@ dependencies = [
     "numpy>=1.21.6",
     "scipy>=1.6.0",
     "pandas>=1.2.0",
-    "scikit-learn>=1.0.0",
-    "torch>=2.0.0"
+    "scikit-learn>=1.0.0"
 ]
 
 [project.optional-dependencies]
-# GPU acceleration requires a CUDA-capable or MPS-capable PyTorch wheel.
-# Install separately, e.g.: pip install torch --index-url https://download.pytorch.org/whl/cu118
-# This extras group is intentionally empty — torch manages its own CUDA runtime.
-gpu = []
+# GPU acceleration; installs PyTorch. For CUDA/MPS-specific wheels, override:
+#   pip install nufi[gpu] --index-url https://download.pytorch.org/whl/cu118
+gpu = ["torch>=2.0.0"]
 
 [tool.setuptools.packages.find]
 include = ["nufi*"]

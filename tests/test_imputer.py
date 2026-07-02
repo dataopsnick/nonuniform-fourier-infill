@@ -17,6 +17,7 @@ def test_infill_dataframe_wrapper():
     assert isinstance(df_filled, pd.DataFrame)
     assert not df_filled.isna().any().any()
     assert len(df_filled) == len(df)
+    assert 'timestamp' not in df_filled.columns
     # Verify observed values are preserved
     assert df_filled.loc[0, 'signal'] == 10.0
     assert df_filled.loc[2, 'signal'] == 30.0
@@ -132,8 +133,8 @@ def test_gcv_tuning():
         obs_max = np.nanmax(col_obs)
         # Verify no wild outliers using a tolerance proportional to the data scale
         col_range = obs_max - obs_min if obs_max > obs_min else 1.0
-        assert np.all(X_filled[:, col_idx] >= obs_min - 3.0 * col_range)
-        assert np.all(X_filled[:, col_idx] <= obs_max + 3.0 * col_range)
+        assert np.all(X_filled[:, col_idx] >= obs_min - 0.5 * col_range)
+        assert np.all(X_filled[:, col_idx] <= obs_max + 0.5 * col_range)
 
 def test_stochastic_imputation():
     # Verify that stochastic multiple imputation produces non-deterministic filled values
@@ -162,8 +163,8 @@ def test_stochastic_imputation():
     assert X_filled_2[2, 0] == 3.0
     
     # Use a tolerance to avoid false failures from floating-point coincidences
-    assert abs(X_filled_1[1, 0] - X_filled_2[1, 0]) > 1e-12 or abs(X_filled_1[3, 0] - X_filled_2[3, 0]) > 1e-12, (
-        "Stochastic imputations should differ; both pairs were identical"
+    assert abs(X_filled_1[1, 0] - X_filled_2[1, 0]) > 1e-12 and abs(X_filled_1[3, 0] - X_filled_2[3, 0]) > 1e-12, (
+        "Stochastic imputations should differ at both missing positions; at least one pair was identical"
     )
     
     # With fixed random_state: calls should be reproducible
@@ -196,7 +197,7 @@ def test_stochastic_imputation_multicol():
     if obs_mask.sum() >= 2:
         observed_ratio = X[obs_mask, 0] / X[obs_mask, 1]
         filled_ratio = X_filled[~obs_mask, 0] / X_filled[~obs_mask, 1]
-        assert np.allclose(np.mean(filled_ratio), np.mean(observed_ratio), rtol=0.5)
+        assert np.allclose(np.mean(filled_ratio), np.mean(observed_ratio), rtol=0.3)
 
 def test_imputer_edge_cases():
     # Task 22: Missing edge cases
@@ -211,6 +212,7 @@ def test_imputer_edge_cases():
     with pytest.warns(UserWarning, match="all-NaN|empty|no valid"):
         X_filled = imputer1.fit_transform(X_all_nan)
     assert np.isnan(X_filled[:, 1]).all()  # column with all NaNs remains NaN or handles gracefully
+    assert np.allclose(X_filled[:, 0], X_all_nan[:, 0])  # non-NaN column should be unchanged
     
     # 2. Single-row input
     X_single_row = np.array([[1.0, np.nan]], dtype=np.float64)
@@ -227,4 +229,8 @@ def test_imputer_edge_cases():
     # 4. Invalid parameters: negative/zero alpha should raise ValueError
     with pytest.raises(ValueError):
         bad_imputer = NufiImputer(alpha=-1.0)
+        bad_imputer.fit_transform(X_no_nans)
+
+    with pytest.raises(ValueError):
+        bad_imputer = NufiImputer(alpha=0.0)
         bad_imputer.fit_transform(X_no_nans)

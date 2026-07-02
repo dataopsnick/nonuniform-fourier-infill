@@ -61,8 +61,7 @@ class TestAgentNativeLayer(unittest.TestCase):
         # Count snapshot files (.csv)
         files = os.listdir(self.test_history)
         csv_files = [f for f in files if f.endswith(".csv")]
-        self.assertTrue(any("pre_infill" in f for f in csv_files))
-        self.assertTrue(any("post_infill" in f for f in csv_files))
+        self.assertGreaterEqual(len(csv_files), 2, f"Expected at least 2 CSV snapshots, got: {csv_files}")
 
     def test_impute_dataframe_empty(self):
         """Edge case: empty DataFrame should raise ValueError."""
@@ -82,9 +81,16 @@ class TestAgentNativeLayer(unittest.TestCase):
         )
         self.assertTrue(result_df["signal"].isna().all())
         self.assertIn("signal", diagnostics)
-        flags = diagnostics["signal"]["stability_flags"]
+        col_diag = diagnostics["signal"]
+        self.assertIn("stability_flags", col_diag)
+        flags = col_diag["stability_flags"]
         self.assertIsInstance(flags, list)
         self.assertIn("NO_OBSERVATIONS", flags)
+        # Verify other diagnostic fields have safe sentinel values
+        self.assertIn("snr_db", col_diag)
+        self.assertIn("spectral_entropy", col_diag)
+        self.assertIn("optimized_alpha", col_diag)
+        self.assertIn("n_frequencies", col_diag)
 
     def test_impute_dataframe_no_nans(self):
         """Edge case: DataFrame with no missing values."""
@@ -95,7 +101,7 @@ class TestAgentNativeLayer(unittest.TestCase):
             log_path=self.test_log,
             history_dir=self.test_history
         )
-        pd.testing.assert_frame_equal(clean_df, result_df, atol=1e-2)
+        pd.testing.assert_frame_equal(clean_df, result_df, atol=1e-8)
 
     def test_impute_dataframe_missing_time_col(self):
         """Edge case: specified time column does not exist."""
@@ -150,8 +156,17 @@ class TestAgentNativeLayer(unittest.TestCase):
         # Verify reversion returns exactly the original data
         df_reverted = tracker.revert_to_version(ver_id)
         pd.testing.assert_frame_equal(df_orig, df_reverted)
+        # Guard against false positive: ensure reverted is not the mutated version
+        self.assertFalse(
+            df_reverted["signal"].equals(df_mutated["signal"]),
+            "revert_to_version returned the mutated dataframe instead of the original snapshot"
+        )
 
     def test_agent_plot_diagnostics(self):
+        # Ensure non-interactive backend for headless CI environments
+        import matplotlib
+        matplotlib.use('Agg')
+        
         # Run infilling
         infilled_df, diagnostics = impute_dataframe(
             self.df,

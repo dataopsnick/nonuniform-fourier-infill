@@ -52,6 +52,21 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             random_state=self.random_state
         )
 
+    def _sort_and_compute_nyquist(self, timestamps, data):
+        v_timestamps = timestamps.copy()
+        v_data = data.copy()
+        if len(v_timestamps) > 1:
+            # Ensure sorted before computing sampling intervals
+            if not np.all(np.diff(v_timestamps) >= 0):
+                sort_idx = np.argsort(v_timestamps)
+                v_timestamps = v_timestamps[sort_idx]
+                v_data = v_data[sort_idx]
+        p_n = np.diff(v_timestamps) if len(v_timestamps) > 1 else np.array([1.0])
+        min_p = np.min(p_n[p_n > 0]) if np.any(p_n > 0) else 1.0
+        max_sampling_rate = 1.0 / min_p
+        nyquist_frequency = max_sampling_rate / 2.0
+        return v_timestamps, v_data, nyquist_frequency
+
     def fit(self, X, y=None, timestamps=None):
         """
         Fits the imputer on X. If X is a Pandas DataFrame, the index is used as timestamps
@@ -101,16 +116,7 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             best_alpha = self.alpha if isinstance(self.alpha, (int, float)) else 1e-4
             best_gcv = float('inf')
             
-            if len(v_timestamps) > 1:
-                # Ensure sorted before computing sampling intervals
-                if not np.all(np.diff(v_timestamps) >= 0):
-                    sort_idx = np.argsort(v_timestamps)
-                    v_timestamps = v_timestamps[sort_idx]
-                    v_data = v_data[sort_idx]
-            p_n = np.diff(v_timestamps)
-            min_p = np.min(p_n[p_n > 0]) if np.any(p_n > 0) else 1.0
-            max_sampling_rate = 1.0 / min_p
-            nyquist_frequency = max_sampling_rate / 2.0
+            v_timestamps, v_data, nyquist_frequency = self._sort_and_compute_nyquist(v_timestamps, v_data)
             
             for n_f in candidates:
                 f_k = np.linspace(0, nyquist_frequency, n_f)
@@ -147,7 +153,7 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             
             if best_gcv == float('inf'):
                 import warnings
-                best_n_freq = min(max(5, N_val), N_val)  # avoid underdetermined system
+                best_n_freq = max(5, min(N_val - 1, N_val // 2))  # ensure n_f < N_val to avoid underdetermined system
                 best_alpha = 1.0
                 warnings.warn(
                     f"All GCV candidates failed SVD for column {col_idx}. "
@@ -180,9 +186,9 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                 self.d_ = np.eye(n_cols)
                 self.perm_ = np.arange(n_cols)
                 
-                # Filter valid_cols using valid_idx_comp to handle degenerate columns dropped.
-                # valid_idx_comp references the doubled (real+imag) space.
-                actual_valid_cols = [valid_cols[idx] for idx in valid_idx_comp]
+                # Note: valid_idx_comp should reference indices in the original (non-doubled) space.
+                # If it references doubled space, this will cause an IndexError.
+                actual_valid_cols = [valid_cols[idx] for idx in valid_idx_comp if idx < len(valid_cols)]
                 
                 for i, c_i in enumerate(actual_valid_cols):
                     self.perm_[c_i] = actual_valid_cols[perm_small[i]]
@@ -210,6 +216,8 @@ class NufiImputer(BaseEstimator, TransformerMixin):
         Transforms X by infilling NaNs using the fitted NUDFT-based smooth reconstruction.
         Supports stochastic posterior sampling representing imputation uncertainty.
         """
+        from sklearn.utils.validation import check_is_fitted
+        check_is_fitted(self, ['alphas_', 'n_frequencies_', 'timestamps_'])
         from nufi.kernels.torch_kernels import solve_tikhonov_nudft
         
         if isinstance(X, pd.DataFrame):
@@ -246,16 +254,7 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             alpha = self.alphas_[col_idx] if col_idx < len(self.alphas_) else (self.alpha if isinstance(self.alpha, (int, float)) else 1e-4)
             n_f = self.n_frequencies_[col_idx] if col_idx < len(self.n_frequencies_) else (self.n_frequencies if isinstance(self.n_frequencies, int) else len(X_data))
             
-            if len(v_timestamps) > 1:
-                # Ensure sorted before computing sampling intervals
-                if not np.all(np.diff(v_timestamps) >= 0):
-                    sort_idx = np.argsort(v_timestamps)
-                    v_timestamps = v_timestamps[sort_idx]
-                    v_data = v_data[sort_idx]
-            p_n = np.diff(v_timestamps)
-            min_p = np.min(p_n[p_n > 0]) if np.any(p_n > 0) else 1.0
-            max_sampling_rate = 1.0 / min_p
-            nyquist_frequency = max_sampling_rate / 2.0
+            v_timestamps, v_data, nyquist_frequency = self._sort_and_compute_nyquist(v_timestamps, v_data)
             f_k = np.linspace(0, nyquist_frequency, n_f)
             
             # Solve regularized system for continuous NUDFT spectrum F
@@ -306,6 +305,9 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                     imputed_vals = (reconstructed_compensated[nan_mask] + noise) / cov_scale if cov_scale > 0 else reconstructed_compensated[nan_mask] + noise
                     X_data[nan_mask, col_idx] = imputed_vals
                 else:
+                    # Deterministic fill: use reconstructed signal (covariance compensation
+                    # only scales/decorrelates residuals, so the deterministic reconstruction
+                    # does not change since the scaling factor cancels out).
                     X_data[nan_mask, col_idx] = reconstructed_np[nan_mask]
                     
             infilled_data[:, col_idx] = X_data[:, col_idx]

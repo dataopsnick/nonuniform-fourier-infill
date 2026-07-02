@@ -58,9 +58,20 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False, sort=
             pd_df = pd_df.sort_values(time_col)
         else:
             pd_df = pd_df.sort_index()
+    else:
+        import warnings
+        warnings.warn(
+            "sort=False: timestamps will not be sorted. "
+            "Non-monotonic timestamps may produce incorrect frequency estimates.",
+            UserWarning
+        )
 
     # If a specific column is defined as time, set it as index
     if time_col is not None:
+        if pd_df[time_col].isna().any():
+            raise ValueError(
+                f"time_col '{time_col}' contains NaN values, which are not valid as timestamps."
+            )
         # Capture the original index name before replacement and warn if discarded
         previous_index_name = pd_df.index.name
         if previous_index_name is not None:
@@ -175,6 +186,12 @@ def infill_multiindex_dataframe(df, imputer=None, entity_level=0, time_level=1, 
         if sort:
             group_sorted = group.sort_index(level=time_level)
         else:
+            import warnings
+            warnings.warn(
+                "sort=False: timestamps will not be sorted. "
+                "Non-monotonic timestamps may produce incorrect frequency estimates.",
+                UserWarning
+            )
             group_sorted = group
 
         # Drop the multi-index temporarily for fit_transform but keep index values as timestamps
@@ -191,7 +208,11 @@ def infill_multiindex_dataframe(df, imputer=None, entity_level=0, time_level=1, 
 
         # Validate strictly monotonic timestamps to prevent Nyquist overflow
         if len(timestamps) > 1:
-            diffs = np.diff(timestamps.astype(np.float64))
+            # Use integer diff on datetime64 to avoid float64 precision loss
+            if np.issubdtype(timestamps.dtype, np.datetime64):
+                diffs = np.diff(timestamps.view('int64'))
+            else:
+                diffs = np.diff(timestamps.astype(np.float64))
             if np.any(diffs <= 0):
                 raise ValueError(
                     f"Timestamps for group must be strictly increasing; "
