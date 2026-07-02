@@ -7,6 +7,13 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False):
     Infill a standard single-index or column-based Pandas / cuDF DataFrame.
     If cuDF is detected, handles GPU memory transfer seamlessly.
 
+    .. warning::
+        The imputer instance is **not thread-safe**. If the same ``NufiImputer``
+        object is shared across threads or concurrent calls, internal fitted
+        state (timestamps, GCV parameters, LDL^T factors) will race and may
+        produce corrupted results. Use a separate instance per thread or
+        protect calls with external locking.
+
     Parameters:
     -----------
     df : pandas.DataFrame or cudf.DataFrame
@@ -44,6 +51,15 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False):
             raise ValueError(
                 f"time_col '{time_col}' not found in DataFrame columns: {list(pd_df.columns)}"
             )
+        # Capture the original index name before replacement and warn if discarded
+        previous_index_name = pd_df.index.name
+        if previous_index_name is not None:
+            import warnings
+            warnings.warn(
+                f"DataFrame index name {previous_index_name!r} is being discarded "
+                "as it is being replaced by time_col.",
+                UserWarning
+            )
         if keep_time_col:
             import warnings
             warnings.warn(
@@ -63,6 +79,7 @@ def infill_dataframe(df, imputer=None, time_col=None, keep_time_col=False):
             # distort covariance estimation if timestamp values differ in scale.
         else:
             pd_df = pd_df.set_index(time_col)
+            pd_df.index.name = None
         
     infilled_pd = imputer.fit_transform(pd_df)
     
@@ -82,6 +99,13 @@ def infill_multiindex_dataframe(df, imputer=None, entity_level=0, time_level=1, 
     Infill a MultiIndex Pandas/cuDF DataFrame (typically panel data).
     Each entity group (e.g. per-entity time series) is infilled independently
     to preserve distinct group behaviors and covariance.
+
+    .. warning::
+        The imputer instance is **not thread-safe**. If the same ``NufiImputer``
+        object is shared across threads or concurrent calls, internal fitted
+        state (timestamps, GCV parameters, LDL^T factors) will race and may
+        produce corrupted results. Use a separate instance per thread or
+        protect calls with external locking.
 
     Parameters:
     -----------
@@ -139,11 +163,36 @@ def infill_multiindex_dataframe(df, imputer=None, entity_level=0, time_level=1, 
         # Drop the multi-index temporarily for fit_transform but keep index values as timestamps
         timestamps = group_sorted.index.get_level_values(time_level).to_numpy()
         
+        # Validate timestamp convertibility early
+        try:
+            np.array(timestamps, dtype=np.float64)
+        except (TypeError, ValueError):
+            raise TypeError(
+                f"Timestamp level '{time_level}' has dtype {timestamps.dtype}, "
+                f"which cannot be converted to float64. Use a numeric or datetime64 index level."
+            )
+
+        # Validate strictly monotonic timestamps to prevent Nyquist overflow
+        if len(timestamps) > 1:
+            diffs = np.diff(timestamps.astype(np.float64))
+            if np.any(diffs <= 0):
+                raise ValueError(
+                    f"Timestamps for group must be strictly increasing; "
+                    f"found non-positive or zero difference. "
+                    f"Check for duplicate or out-of-order timestamps."
+                )
+
         # Avoid to_numpy() which coerces dtypes; copy with a clean index instead
         temp_df = group_sorted.copy()
         temp_df.index = timestamps
         
-        infilled_temp = imputer.fit_transform(temp_df)
+        try:
+            infilled_temp = imputer.fit_transform(temp_df)
+        except Exception as e:
+            entity_id = group_sorted.index.get_level_values(entity_level)[0]
+            raise RuntimeError(
+                f"NufiImputer.fit_transform failed for entity {entity_id!r}: {e}"
+            ) from e
         
         if len(infilled_temp) != len(group_sorted):
             raise ValueError(
@@ -161,6 +210,12 @@ def infill_multiindex_dataframe(df, imputer=None, entity_level=0, time_level=1, 
     for _, group in grouped:
         infilled_dfs.append(imputer_apply(group))
     infilled_pd = pd.concat(infilled_dfs)
+    
+    if len(infilled_pd) != len(pd_df):
+        raise ValueError(
+            f"Concatenated result has {len(infilled_pd)} rows, "
+            f"expected {len(pd_df)}. Group-level indices may overlap or be non-unique."
+        )
     
     if is_cudf:
         return cudf.DataFrame.from_pandas(infilled_pd)

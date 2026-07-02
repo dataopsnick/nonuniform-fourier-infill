@@ -213,14 +213,22 @@ def impute_dataframe(
 
     if not pd.api.types.is_numeric_dtype(df_copy.index):
         try:
-            # Attempt conversion for datetime-like or string timestamps
-            numeric_idx = pd.to_numeric(df_copy.index, errors='coerce')
-            if numeric_idx.isna().any():
-                raise ValueError("Index contains non-convertible values")
-            if np.can_cast(numeric_idx, np.int64, casting='safe'):
-                df_copy.index = numeric_idx.astype(np.int64)
+            # Handle datetime-like index explicitly
+            if pd.api.types.is_datetime64_any_dtype(df_copy.index):
+                import warnings
+                warnings.warn(
+                    "DatetimeIndex detected. Converting to nanosecond epoch (int64) which may cause precision loss.",
+                    UserWarning
+                )
+                df_copy.index = df_copy.index.astype(np.int64)
             else:
-                df_copy.index = numeric_idx.astype(np.float64)
+                numeric_idx = pd.to_numeric(df_copy.index, errors='coerce')
+                if numeric_idx.isna().any():
+                    raise ValueError("Index contains non-convertible values")
+                if np.can_cast(numeric_idx, np.int64, casting='safe'):
+                    df_copy.index = numeric_idx.astype(np.int64)
+                else:
+                    df_copy.index = numeric_idx.astype(np.float64)
         except Exception:
             raise TypeError(
                 f"DataFrame index must be numeric (timestamps). "
@@ -230,11 +238,13 @@ def impute_dataframe(
 
     timestamps = df_copy.index.to_numpy(dtype=np.float64)
     max_ts = np.max(np.abs(timestamps)) if len(timestamps) > 0 else 0
+    epoch = 0.0
     if max_ts > 2**53:
         import warnings
         # Subtract epoch to preserve relative precision in float64
-        epoch = timestamps[0] if len(timestamps) > 0 else 0.0
-        timestamps = timestamps - epoch
+        epoch = float(timestamps[0]) if len(timestamps) > 0 else 0.0
+        df_copy.index = df_copy.index - epoch
+        timestamps = df_copy.index.to_numpy(dtype=np.float64)
         warnings.warn(
             f"Timestamps exceed float64 precision (max={max_ts:.1e}). "
             f"Normalized by subtracting epoch={epoch} to preserve relative precision."
@@ -254,6 +264,10 @@ def impute_dataframe(
 
     imputer.fit(df_copy, timestamps=timestamps)
     infilled_df = imputer.transform(df_copy, timestamps=timestamps, stochastic=stochastic, stochastic_scale=stochastic_scale)
+
+    # Restore the epoch after transform to map back to original unshifted index
+    if epoch != 0.0:
+        infilled_df.index = infilled_df.index + epoch
 
     # Restore original index/columns name or structure if time_col was used
     if time_col is not None:
@@ -311,10 +325,8 @@ def impute_dataframe(
             reconstructed = torch.real(torch.sum(F.unsqueeze(0) * torch.exp(exponent), dim=1))
             reconstructed_np = reconstructed.cpu().numpy()
 
-        if imputer.covariance_compensation and imputer.d_ is not None:
-            cov_scale = np.sqrt(np.abs(np.diag(imputer.d_)[col_idx]))
-            if cov_scale > 0:
-                reconstructed_np = reconstructed_np * cov_scale
+        # Note: imputer.reconstructed_ already includes covariance compensation.
+        # Do not apply cov_scale again to avoid double-compensation in diagnostics.
 
         signal_variance = np.var(reconstructed_np)
         residual = v_data - reconstructed_np
@@ -436,14 +448,22 @@ def plot_diagnostics(
     for df_copy in (orig_copy, inf_copy):
         if not pd.api.types.is_numeric_dtype(df_copy.index):
             try:
-                # Attempt conversion for datetime-like or string timestamps
-                numeric_idx = pd.to_numeric(df_copy.index, errors='coerce')
-                if numeric_idx.isna().any():
-                    raise ValueError("Index contains non-convertible values")
-                if np.can_cast(numeric_idx, np.int64, casting='safe'):
-                    df_copy.index = numeric_idx.astype(np.int64)
+                # Handle datetime-like index explicitly
+                if pd.api.types.is_datetime64_any_dtype(df_copy.index):
+                    import warnings
+                    warnings.warn(
+                        "DatetimeIndex detected. Converting to nanosecond epoch (int64) which may cause precision loss.",
+                        UserWarning
+                    )
+                    df_copy.index = df_copy.index.astype(np.int64)
                 else:
-                    df_copy.index = numeric_idx.astype(np.float64)
+                    numeric_idx = pd.to_numeric(df_copy.index, errors='coerce')
+                    if numeric_idx.isna().any():
+                        raise ValueError("Index contains non-convertible values")
+                    if np.can_cast(numeric_idx, np.int64, casting='safe'):
+                        df_copy.index = numeric_idx.astype(np.int64)
+                    else:
+                        df_copy.index = numeric_idx.astype(np.float64)
             except Exception:
                 raise TypeError(
                     f"DataFrame index must be numeric (timestamps). "
@@ -452,6 +472,18 @@ def plot_diagnostics(
                 )
 
     timestamps = orig_copy.index.to_numpy(dtype=np.float64)
+    max_ts = np.max(np.abs(timestamps)) if len(timestamps) > 0 else 0
+    epoch = 0.0
+    if max_ts > 2**53:
+        import warnings
+        epoch = float(timestamps[0]) if len(timestamps) > 0 else 0.0
+        orig_copy.index = orig_copy.index - epoch
+        inf_copy.index = inf_copy.index - epoch
+        timestamps = orig_copy.index.to_numpy(dtype=np.float64)
+        warnings.warn(
+            f"Timestamps exceed float64 precision (max={max_ts:.1e}). "
+            f"Normalized by subtracting epoch={epoch} to preserve relative precision."
+        )
 
     if columns is None:
         columns = list(orig_copy.columns)[:5]
@@ -540,3 +572,4 @@ def plot_diagnostics(
         plt.show()
     else:
         plt.close()
+    return fig, axes

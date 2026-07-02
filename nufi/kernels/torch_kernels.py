@@ -21,6 +21,9 @@ def compute_ND_NUDFT(X_list, device=None):
     Computes the 1D Non-Uniform Discrete Fourier Transform (NUDFT) for each
     multidimensional signal in X_list using PyTorch acceleration.
     Gracefully handles NaNs by masking them out.
+
+    .. note::
+        Uses the forward (analysis) NUDFT convention: A[n,k] = exp(-2πi * t_n * f_k).
     """
     dev = get_device(device)
     results = []
@@ -41,7 +44,7 @@ def compute_ND_NUDFT(X_list, device=None):
         v_data = data[valid_mask]
 
         N = len(data)
-        # Estimate Nyquist frequency from median/min sampling interval
+        # Estimate Nyquist frequency from median sampling interval to prevent numerical overflow
         if len(v_timestamps) > 1:
             # Sort to ensure positive diffs
             sort_idx = np.argsort(v_timestamps)
@@ -49,8 +52,8 @@ def compute_ND_NUDFT(X_list, device=None):
             p_n = np.diff(sorted_ts)
             p_n = p_n[p_n > 0]  # keep only positive intervals
             if len(p_n) > 0:
-                min_p = np.min(p_n)
-                nyquist_frequency = 0.5 / max(min_p, 1e-12)
+                median_p = np.median(p_n)
+                nyquist_frequency = 0.5 / max(median_p, 1e-12)
             else:
                 import warnings
                 warnings.warn("Cannot estimate Nyquist frequency; all sampling intervals are zero or negative. Defaulting to 1.0.")
@@ -76,6 +79,7 @@ def compute_ND_NUDFT(X_list, device=None):
                 f"Consider using compute_Fast_ND_NUDFT or reduce N."
             )
 
+        # Forward NUDFT: A[n,k] = exp(-2πi * t_n * f_k)  (analysis convention)
         exponent = -2.0j * np.pi * t_timestamps.unsqueeze(1) * f_k.unsqueeze(0)
         summation = torch.sum(t_data_all.to(torch.complex128).unsqueeze(1) * torch.exp(exponent), dim=0)
         
@@ -88,6 +92,12 @@ def compute_Fast_ND_NUDFT(X_list, device=None):
     Performs Fast Non-Uniform DFT by interpolating onto a uniform grid 
     and computing FFT using PyTorch rfft/fft.
     Gracefully handles NaNs during interpolation.
+
+    .. warning::
+        This function uses linear interpolation, which introduces spectral
+        leakage and amplitude distortion. It is a fast approximation, not an
+        exact NUDFT. For higher accuracy, consider compute_ND_NUDFT or a
+        gridding-based approach.
     """
     dev = get_device(device)
     results = []
@@ -149,14 +159,24 @@ def covariance_compensation(X_list, device=None):
     df = pd.DataFrame(flat_data)
     covariance_matrix = df.cov().to_numpy()
 
-    nan_mask = np.any(np.isnan(covariance_matrix), axis=0)
+    # Detect degenerate columns on the diagonal of the covariance matrix
+    diag = np.diag(covariance_matrix)
+    diag_nan = np.isnan(diag)
     valid_idx = np.arange(covariance_matrix.shape[0])  # default: all valid
-    if np.any(nan_mask):
+    if np.any(diag_nan):
         import warnings
-        n_nan = nan_mask.sum()
-        warnings.warn(f"Covariance matrix contains NaN entries in {n_nan} columns; degenerate columns detected. Applying regularization.")
-        # Drop degenerate rows/columns instead of zero-filling
-        valid_idx = np.where(~nan_mask)[0]
+        n_nan = diag_nan.sum()
+        warnings.warn(f"Covariance matrix contains NaN on diagonal in {n_nan} entries; degenerate columns detected. Applying regularization.")
+        # Drop degenerate real/imag pairs together: for each NaN diagonal entry at index k,
+        # also drop its paired component (assuming real at even indices, imag at odd, or
+        # N real then N imag layout).
+        # For N-real-then-N-imag layout, paired index is (k + N) % (2*N).
+        N = covariance_matrix.shape[0] // 2
+        pair_mask = np.zeros(covariance_matrix.shape[0], dtype=bool)
+        for k in np.where(diag_nan)[0]:
+            pair_mask[k] = True
+            pair_mask[(k + N) % (2 * N)] = True
+        valid_idx = np.where(~pair_mask)[0]
         if len(valid_idx) == 0:
             raise ValueError("All columns are degenerate; cannot compute covariance compensation.")
         covariance_matrix = covariance_matrix[np.ix_(valid_idx, valid_idx)]
@@ -180,11 +200,19 @@ def solve_cg(A, b, alpha, max_iter=100, tol=1e-5):
     """
     Solves the regularized system (A^H A + alpha * I) F = b using the 
     iterative Conjugate Gradient method for complex vectors.
+
+    .. note::
+        H(v) = A^H A v + alpha v applies CG to the normal equations,
+        which squares the condition number of A. For ill-conditioned A, prefer
+        the augmented-system (direct) solver in solve_tikhonov_nudft.
     """
     dev = A.device
     M = A.shape[1]
     x = torch.zeros(M, dtype=torch.complex128, device=dev)
     
+    # NOTE: H(v) = A^H A v + alpha v applies CG to the normal equations,
+    # which squares the condition number of A. For ill-conditioned A, prefer
+    # the augmented-system (direct) solver in solve_tikhonov_nudft.
     def H(v):
         return torch.matmul(A.adjoint(), torch.matmul(A, v)) + alpha * v
         
@@ -200,9 +228,9 @@ def solve_cg(A, b, alpha, max_iter=100, tol=1e-5):
         denom = torch.sum(p.conj() * Hp).real
         if denom < 1e-18:
             break
-        alpha_cg = rsold / denom
-        x = x + alpha_cg * p
-        r = r - alpha_cg * Hp
+        step_size = rsold / denom
+        x = x + step_size * p
+        r = r - step_size * Hp
         rsnew = torch.sum(r.conj() * r).real
         if torch.sqrt(rsnew) < tol or rsnew < 1e-18:
             break
@@ -257,6 +285,10 @@ def solve_tikhonov_nudft(timestamps, data, f_k, alpha, solver='direct', max_iter
     """
     Solves the continuous-time NUDFT coefficients using L2/Tikhonov regularization.
     Supports 'direct' SVD/normal-equation solvers or 'cg' Conjugate Gradient.
+
+    .. note::
+        Uses the synthesis (inverse) NUDFT convention where the synthesis matrix
+        has elements A[n,k] = exp(2πi * t_n * f_k).
     """
     if alpha <= 0:
         raise ValueError(f"Regularization parameter alpha must be positive, got {alpha}")

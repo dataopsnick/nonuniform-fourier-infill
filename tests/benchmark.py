@@ -52,6 +52,8 @@ def generate_benchmark_data(n_samples: int = 200, n_channels: int = 3, missing_r
         if len(valid_idx) == 0:
             raise ValueError(f"Channel {c} has no valid observations — cannot benchmark with entirely NaN channel. "
                              f"Consider increasing n_samples or reducing missing_rate.")
+        # NOTE: Patching boundary NaNs gives all methods free extrapolation —
+        #       this may inflate scores for spline/MICE/GP that cannot handle edge NaNs.
         if np.isnan(col[0]):
             col[0] = col[valid_idx[0]]
         if np.isnan(col[-1]):
@@ -98,10 +100,10 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
     start = time.time()
     try:
         spline_infilled = df_masked.interpolate(method='cubic', axis=0)
-        # Fill any remaining NaNs with linear fallback and backward/forward fill
         remaining_nan = spline_infilled.isna().sum().sum()
         if remaining_nan > 0:
-            print(f"[INFO] Cubic spline left {remaining_nan} NaN(s); falling back to linear → ffill → bfill")
+            print(f"[WARN] Cubic spline left {remaining_nan} NaN(s) — results may be degraded by fallback")
+        # Fallback: use linear, then ffill/bfill to ensure no NaN left
         spline_infilled = spline_infilled.interpolate(method='linear', axis=0).ffill().bfill()
         spline_time = time.time() - start
         
@@ -122,8 +124,9 @@ def run_benchmarks(n_samples: int = 200, n_channels: int = 3, missing_rate: floa
     if MICE_AVAILABLE:
         start = time.time()
         try:
-            # We append timestamps as a feature so MICE understands temporal relation
-            combined_masked = np.hstack([timestamps.reshape(-1, 1), df_masked.to_numpy()])
+            # Normalize timestamps to [0,1] so MICE regularization treats them comparably
+            t_norm = (timestamps - timestamps.min()) / (timestamps.max() - timestamps.min())
+            combined_masked = np.hstack([t_norm.reshape(-1, 1), df_masked.to_numpy()])
             
             mice = IterativeImputer(max_iter=10, random_state=42)
             mice_infilled_combined = mice.fit_transform(combined_masked)
@@ -203,8 +206,11 @@ if __name__ == "__main__":
     
     # Save results to disk
     try:
-        with open("benchmark_results.json", "w") as f:
+        from datetime import datetime
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"benchmark_results_{ts}.json"
+        with open(filename, "w") as f:
             json.dump(benchmark_results, f, indent=4)
-            print("Results saved to benchmark_results.json")
+            print(f"Results saved to {filename}")
     except IOError as e:
         print(f"[WARN] Could not save results to disk: {e}")

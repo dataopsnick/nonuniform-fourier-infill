@@ -28,6 +28,10 @@ class NufiImputer(BaseEstimator, TransformerMixin):
         self.max_iter = max_iter
         self.tol = tol
         self.random_state = random_state
+        # Note: lu_ and perm_ are stored for potential downstream use in full
+        # covariance-aware reconstruction. Currently only d_ (diagonal scaling)
+        # is applied in transform(). Consider implementing full LDL^T application
+        # for proper multi-signal covariance compensation.
         self.lu_ = None
         self.d_ = None
         self.perm_ = None
@@ -72,6 +76,9 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             # Decide n_frequencies for this column
             if self.n_frequencies == 'auto':
                 candidates = [max(5, N_val // 4), max(5, N_val // 2), max(5, N_val)]
+                candidates = [c for c in candidates if c <= N_val]  # avoid underdetermined systems
+                if not candidates:
+                    candidates = [max(1, N_val)]
                 candidates = sorted(list(set(candidates)))
             else:
                 candidates = [self.n_frequencies if self.n_frequencies is not None else N_val]
@@ -120,11 +127,11 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             
             if best_gcv == float('inf'):
                 import warnings
-                best_n_freq = max(5, N_val)
+                best_n_freq = min(max(5, N_val), N_val)  # avoid underdetermined system
                 best_alpha = 1.0
                 warnings.warn(
                     f"All GCV candidates failed SVD for column {col_idx}. "
-                    f"Using conservative fallback n_f={best_n_freq}, alpha={best_alpha}."
+                    f"N_val={N_val} is very small; using n_f={best_n_freq}, alpha={best_alpha}."
                 )
             self.alphas_.append(best_alpha)
             self.n_frequencies_.append(best_n_freq)
@@ -154,8 +161,8 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                 self.perm_ = np.arange(n_cols)
                 
                 # Filter valid_cols using valid_idx_comp to handle degenerate columns dropped.
-                # valid_idx_comp references the doubled (real+imag) space; map back via // 2.
-                actual_valid_cols = [valid_cols[idx // 2] for idx in valid_idx_comp]
+                # valid_idx_comp references the doubled (real+imag) space.
+                actual_valid_cols = [valid_cols[idx] for idx in valid_idx_comp]
                 
                 for i, c_i in enumerate(actual_valid_cols):
                     self.perm_[c_i] = actual_valid_cols[perm_small[i]]
@@ -248,21 +255,20 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             reconstructed_np = reconstructed.cpu().numpy()
             self.reconstructed_[col_idx] = reconstructed_np.copy()
             
-            # If covariance compensation is computed, align the reconstructed scale
+            # Compute compensated reconstructed signal for residual analysis
             cov_scale = 1.0
             if self.covariance_compensation and self.d_ is not None:
                 cov_scale = np.sqrt(np.abs(np.diag(self.d_)[col_idx]))
-                if cov_scale > 0:
-                    reconstructed_np = reconstructed_np * cov_scale
+            
+            reconstructed_compensated = reconstructed_np * cov_scale if cov_scale > 0 else reconstructed_np
             
             # Fill only the NaNs
             nan_mask = np.isnan(X_data[:, col_idx])
             if np.any(nan_mask):
                 if stochastic:
-                    # Scale observed data so residual is in compensated space
                     obs_mask = ~nan_mask
                     if np.any(obs_mask):
-                        residual = (X_data[obs_mask, col_idx] * cov_scale if cov_scale > 0 else X_data[obs_mask, col_idx]) - reconstructed_np[obs_mask]
+                        residual = (X_data[obs_mask, col_idx] * cov_scale if cov_scale > 0 else X_data[obs_mask, col_idx]) - reconstructed_compensated[obs_mask]
                         residual_std = np.std(residual) if len(residual) > 1 else 0.1
                         if np.isnan(residual_std) or residual_std == 0:
                             residual_std = 0.1
@@ -270,7 +276,9 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                         residual_std = 0.1
                         
                     noise = rng.normal(0, stochastic_scale * residual_std, size=nan_mask.sum())
-                    X_data[nan_mask, col_idx] = reconstructed_np[nan_mask] + noise
+                    # Convert back to original scale for output
+                    imputed_vals = (reconstructed_compensated[nan_mask] + noise) / cov_scale if cov_scale > 0 else reconstructed_compensated[nan_mask] + noise
+                    X_data[nan_mask, col_idx] = imputed_vals
                 else:
                     X_data[nan_mask, col_idx] = reconstructed_np[nan_mask]
                     

@@ -1,5 +1,10 @@
 import os
 import sys
+import subprocess
+import tempfile
+import shutil
+import sysconfig
+from packaging.version import Version
 
 # Task 8: Check for build-time dependencies
 try:
@@ -19,20 +24,11 @@ except ImportError:
         "Install it via: pip install cython>=3.0.0"
     )
 else:
-    try:
-        from packaging.version import Version
-        if Version(cython_version) < Version("3.0.0"):
-            raise ImportError(
-                f"Cython >= 3.0.0 is required, but {cython_version} is installed. "
-                "Upgrade via: pip install cython>=3.0.0"
-            )
-    except ImportError:
-        cy_parts = [int(x) for x in cython_version.split(".") if x.isdigit()]
-        if len(cy_parts) > 0 and cy_parts[0] < 3:
-            raise ImportError(
-                f"Cython >= 3.0.0 is required, but {cython_version} is installed. "
-                "Upgrade via: pip install cython>=3.0.0"
-            )
+    if Version(cython_version) < Version("3.0.0"):
+        raise ImportError(
+            f"Cython >= 3.0.0 is required, but {cython_version} is installed. "
+            "Upgrade via: pip install cython>=3.0.0"
+        )
 
 try:
     import numpy as np
@@ -43,20 +39,11 @@ except ImportError:
         "Install it via: pip install numpy>=1.20.0"
     )
 else:
-    try:
-        from packaging.version import Version
-        if Version(numpy_version) < Version("1.20.0"):
-            raise ImportError(
-                f"NumPy >= 1.20.0 is required, but {numpy_version} is installed. "
-                "Upgrade via: pip install numpy>=1.20.0"
-            )
-    except ImportError:
-        np_parts = [int(x) for x in numpy_version.split(".") if x.isdigit()]
-        if len(np_parts) >= 2 and (np_parts[0] < 1 or (np_parts[0] == 1 and np_parts[1] < 20)):
-            raise ImportError(
-                f"NumPy >= 1.20.0 is required, but {numpy_version} is installed. "
-                "Upgrade via: pip install numpy>=1.20.0"
-            )
+    if Version(numpy_version) < Version("1.20.0"):
+        raise ImportError(
+            f"NumPy >= 1.20.0 is required, but {numpy_version} is installed. "
+            "Upgrade via: pip install numpy>=1.20.0"
+        )
 
 # Determine compiler flags for OpenMP (multi-threading support)
 ext_compiler_args = []
@@ -93,7 +80,11 @@ else:
                     break
         if libomp_path:
             ext_compiler_args = ["-Xpreprocessor", "-fopenmp"]
-            ext_linker_args = ["-L" + os.path.join(libomp_path, "lib"), "-lomp"]
+            ext_linker_args = [
+                "-L" + os.path.join(libomp_path, "lib"),
+                "-Wl,-rpath," + os.path.join(libomp_path, "lib"),
+                "-lomp",
+            ]
             ext_include_dirs.append(os.path.join(libomp_path, "include"))
         else:
             import warnings
@@ -106,10 +97,6 @@ else:
             ext_linker_args = []
     else:
         # Linux, BSD, or other systems. Let's check compiler support for -fopenmp.
-        import subprocess
-        import tempfile
-        import shutil
-
         has_openmp = False
         tmpdir = None
         try:
@@ -117,7 +104,6 @@ else:
             test_file = os.path.join(tmpdir, "test.c")
             with open(test_file, "w") as f:
                 f.write("#include <omp.h>\nint main(void) { return omp_get_num_threads(); }\n")
-            import sysconfig
             cc = os.environ.get("CC") or sysconfig.get_config_var("CC") or "cc"
             cmd = [cc, "-fopenmp", test_file, "-o", os.path.join(tmpdir, "test")]
             res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -127,7 +113,10 @@ else:
             pass
         finally:
             if tmpdir is not None:
-                shutil.rmtree(tmpdir)
+                try:
+                    shutil.rmtree(tmpdir)
+                except OSError:
+                    pass
 
         if has_openmp:
             ext_compiler_args = ["-fopenmp"]
@@ -156,5 +145,6 @@ setup(
     python_requires=">=3.9",
     install_requires=[
         "numpy>=1.20.0",
+        "packaging",
     ],
 )
