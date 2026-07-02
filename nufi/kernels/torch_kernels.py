@@ -93,14 +93,19 @@ def compute_Fast_ND_NUDFT(X_list, device=None, nyquist_frequency=None):
     Type-1 Fast Non-Uniform DFT using Gaussian Gridding.
     Achieves O(N log N) complexity while perfectly preserving C^infinity continuity 
     and preventing the spectral leakage caused by linear interpolation.
+
+    .. note::
+        The ``nyquist_frequency`` parameter is reserved for future use and is
+        currently ignored by the Gaussian gridding algorithm.
     """
     dev = get_device(device)
     results = []
     
-    if nyquist_frequency is None and len(X_list) > 1:
+    _ = nyquist_frequency  # reserved; not yet wired into the gridding algorithm
+    if len(X_list) > 1:
         import warnings
-        warnings.warn("nyquist_frequency not provided; estimating per-signal. "
-                      "Pass an explicit nyquist_frequency for multi-signal workflows.")
+        warnings.warn("nyquist_frequency is not yet used by the Fast NUDFT algorithm. "
+                      "Output frequency scaling depends solely on the number of valid points.")
 
     for X in X_list:
         timestamps = np.array(X.timestamps, dtype=np.float64)
@@ -110,14 +115,18 @@ def compute_Fast_ND_NUDFT(X_list, device=None, nyquist_frequency=None):
         v_timestamps = timestamps[valid_mask]
         v_data = data[valid_mask]
 
+        N_full = len(data)
         N = len(v_data)
         if N == 0:
-            results.append(torch.zeros(0, dtype=torch.complex128, device=dev))
+            results.append(torch.zeros(N_full, dtype=torch.complex128, device=dev))
             continue
 
         # 1. Coordinate Scaling
         # Scale timestamps to [0, 2*pi] to standardize the Gaussian spread
         t_min, t_max = np.min(v_timestamps), np.max(v_timestamps)
+        if t_max <= t_min:
+            import warnings
+            warnings.warn("All non-NaN timestamps are identical; spectrum will be degenerate.")
         span = t_max - t_min if t_max > t_min else 1.0
         t_scaled = (v_timestamps - t_min) / span * (2 * np.pi)
 
@@ -155,11 +164,13 @@ def compute_Fast_ND_NUDFT(X_list, device=None, nyquist_frequency=None):
 
         # 5. Apodization Deconvolution
         # Divide out the effect of the Gaussian smear in the frequency domain
-        k = torch.arange(N, dtype=torch.float64, device=dev)
+        k = torch.arange(N_full, dtype=torch.float64, device=dev)
+        # Use a sigma scaling that matches the computed sigma from M
         apodization = torch.exp((k**2) * (sigma**2) / 2.0)
         
-        # Extract the positive frequencies and apply the analytic correction
-        F = F_grid[:N] * apodization
+        # Extract the positive frequencies, apply analytic correction and grid normalisation
+        # To maintain length matching len(data) = N_full, we slice and compute up to N_full
+        F = F_grid[:N_full] * apodization / M
         
         results.append(F)
 

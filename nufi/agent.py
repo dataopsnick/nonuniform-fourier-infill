@@ -69,7 +69,7 @@ class TransformationTracker:
         filepath = os.path.join(self.history_dir, filename)
         
         with self._lock:
-            # Write CSV first (if it fails, no log pollution)
+            # Write parquet first (if it fails, no log pollution)
             try:
                 # Swap to parquet for I/O performance, dtype preservation, and storage efficiency
                 filepath = filepath.replace('.csv', '.parquet')
@@ -108,27 +108,24 @@ class TransformationTracker:
             if not os.path.exists(self.history_dir):
                 return []
             try:
-                files = [f for f in os.listdir(self.history_dir) if f.endswith(".csv")]
+                files = [f for f in os.listdir(self.history_dir) if f.endswith(".parquet")]
                 files.sort()  # Chronological order because of time-based ID prefix
                 versions = []
                 for f in files:
                     parts = f.split("_")
-                    # Detect new format: ver_{ts}_{uuid8}_{step_name}.csv
-                    # Old format: ver_{timestamp}_{step_name}.csv
                     if len(parts) >= 4 and re.match(r'^[0-9a-f]{8}$', parts[2]):
                         version_id = f"{parts[0]}_{parts[1]}_{parts[2]}"
-                        # Validate that the version_id matches the expected pattern
                         if not re.match(r'^ver_\d+_[0-9a-f]{8}$', version_id):
-                            continue  # skip files with ambiguous names
-                        step_name = "_".join(parts[3:]).replace(".csv", "")
+                            continue
+                        step_name = "_".join(parts[3:]).replace(".parquet", "")
                     elif len(parts) >= 3:
                         version_id = f"{parts[0]}_{parts[1]}"
                         if not re.match(r'^ver_\d+$', version_id):
                             continue
-                        step_name = "_".join(parts[2:]).replace(".csv", "")
+                        step_name = "_".join(parts[2:]).replace(".parquet", "")
                     else:
                         version_id = parts[0]
-                        step_name = parts[1].replace(".csv", "")
+                        step_name = parts[1].replace(".parquet", "")
                     versions.append({
                         "version_id": version_id,
                         "step_name": step_name,
@@ -154,7 +151,7 @@ class TransformationTracker:
             try:
                 if not os.path.exists(target["filepath"]):
                     raise TransformationLoggingError(f"Snapshot file {target['filepath']} no longer exists.")
-                df = pd.read_csv(target["filepath"], index_col=0)
+                df = pd.read_parquet(target["filepath"])
                 # Validate snapshot integrity
                 if df.empty:
                     raise TransformationLoggingError(f"Snapshot {version_id} is empty or corrupted.")

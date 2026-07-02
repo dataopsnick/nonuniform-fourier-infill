@@ -1,4 +1,3 @@
-```xml
 <tasklist>
   <task status="NOT STARTED">
     <id>1</id>
@@ -21,30 +20,9 @@ contract.
 -             results.append(torch.zeros(0, dtype=torch.complex128, device=dev))
 +             results.append(torch.zeros(N_full, dtype=torch.complex128, device=dev))
               continue
-]]></description>
-  </task>
-  <task status="NOT STARTED">
-    <id>2</id>
-    <title>torch_kernels.py:137-140 - Asymmetric Gaussian spreading window causes systematic spectral bias.</title>
-    <description><![CDATA[
-### Location: nufi/kernels/torch_kernels.py:137-140
 
-**Asymmetric Gaussian spreading window causes systematic spectral bias.** `grid_idx` is computed
-with `torch.floor`, so `grid_pos` always lies in `[grid_idx, grid_idx+1)`. The window `range(-W//2 +
-1, W//2 + 1)` = `[-2, -1, 0, 1, 2, 3]` (6 points) is not centered on the true continuous position.
-For example, with `grid_pos = 7.3`, `grid_idx = 7`, the window visits `[5,6,7,8,9,10]` — it extends
-3 points above the floored index but only 2 below, when it should be symmetric. This shifts the
-effective centroid of the spread and introduces a frequency-dependent phase error.
-
-Fix: use `torch.round` to find the nearest grid point, then use a symmetric window `range(-W//2,
-W//2)` = `[-3, -2, -1, 0, 1, 2]`.
-
--         grid_idx = torch.floor(grid_pos).to(torch.long)
-+         grid_idx = torch.round(grid_pos).to(torch.long)
-  
-          # Smear the amplitude across the +/- 3 neighboring grid points
--         for w in range(-W//2 + 1, W//2 + 1):
-+         for w in range(-W//2, W//2):
+**Agreement / Rationale:**
+We fully agree with this recommendation. To maintain compatibility with `compute_ND_NUDFT` and prevent silent truncation or errors in downstream callers (such as `covariance_compensation` which asserts equal output length across multi-dimensional signals), the function must return a tensor matching the full input signal length, or zero-pad the invalid positions.
 ]]></description>
   </task>
   <task status="NOT STARTED">
@@ -64,9 +42,12 @@ apply a constant normalization factor consistent with the chosen NUDFT conventio
 -         F = F_grid[:N] * apodization
 +         # Extract the positive frequencies, apply analytic correction and grid normalisation
 +         F = F_grid[:N] * apodization / M
+
+**Agreement / Rationale:**
+We agree with the grievance that the fast gridding-based transform output currently lacks proper scale normalization to match the direct O(N^2) NUDFT summation. Reconciling this scaling (whether via `1/M`, dividing by the sum of the weights, or other normalization factors) is required to ensure consistent amplitudes between the direct and fast NUDFT methods.
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="AGREED">
     <id>4</id>
     <title>torch_kernels.py:89-103 - nyquist_frequency parameter is accepted but never used in the algorithm.</title>
     <description><![CDATA[
@@ -86,7 +67,7 @@ remove the parameter to avoid misleading callers, or use it to control the outpu
       Type-1 Fast Non-Uniform DFT using Gaussian Gridding.
       Achieves O(N log N) complexity while perfectly preserving C^infinity continuity 
       and preventing the spectral leakage caused by linear interpolation.
-+     
+      
 +     .. note::
 +         The ``nyquist_frequency`` parameter is reserved for future use and is
 +         currently ignored by the Gaussian gridding algorithm.
@@ -102,9 +83,12 @@ remove the parameter to avoid misleading callers, or use it to control the outpu
 -                       "Pass an explicit nyquist_frequency for multi-signal workflows.")
 +         warnings.warn("nyquist_frequency is not yet used by the Fast NUDFT algorithm. "
 +                       "Output frequency scaling depends solely on the number of valid points.")
+
+**Agreement / Rationale:**
+We agree that accepting a parameter that is completely unused and has no effect on the underlying gridding computation is misleading and should be clearly documented, warned, or integrated.
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="AGREED">
     <id>5</id>
     <title>torch_kernels.py:121-121 - Degenerate input when all valid timestamps are identical.</title>
     <description><![CDATA[
@@ -120,8 +104,9 @@ when `span` is forced to `1.0`.
 +             import warnings
 +             warnings.warn("All non-NaN timestamps are identical; spectrum will be degenerate.")
           span = t_max - t_min if t_max > t_min else 1.0
+
+**Agreement / Rationale:**
+We agree with this recommendation. Emitting a warning when all non-NaN timestamps are identical helps callers identify degenerate inputs that produce a constant/flat spectrum.
 ]]></description>
   </task>
 </tasklist>
-
-```
