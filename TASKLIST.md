@@ -1242,7 +1242,7 @@ repository root are ignored. Alternatively, if the project never ships `.log` fi
 assumption clearly so future contributors are aware.
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>46</id>
     <title>impute.py:18-48,325-336 - Feature: Support Pattern Mixture Models (PMM) and Delta-Adjustment for MNAR Imputation</title>
     <description><![CDATA[
@@ -1302,7 +1302,7 @@ under MAR.
               X_data[nan_mask, col_idx] = imputed_vals
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>47</id>
     <title>wrappers.py:302-360 - Feature: Reference-Based Multiple Imputation (RBMI: J2R, CIR, CR, LMCF)</title>
     <description><![CDATA[
@@ -1349,7 +1349,7 @@ regulatory RBMI mechanisms:
 +         raise ValueError(f"Unsupported rbmi_method '{rbmi_method}'. Expected one of: 'CR', 'J2R', 'CIR', 'LMCF'.")
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>48</id>
     <title>agent.py:424-480 - Feature: Fast Vectorized Tipping Point Sensitivity Analysis & Contour Plotting</title>
     <description><![CDATA[
@@ -1390,7 +1390,7 @@ in milliseconds without re-solving the NUDFT.
 +     """
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>49</id>
     <title>impute.py:216-340 - Feature: Batch Multiple Imputation (M Draws) and Rubin's Rules Pooling Utility</title>
     <description><![CDATA[
@@ -1432,7 +1432,7 @@ Rubin's Rules (1987).
 +     total_var = u_bar + (1.0 + 1.0 / M) * b
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>50</id>
     <title>agent.py:390-415 - Feature: Pre-Dropout Derivative MNAR Diagnostics (Diggle-Kenward) & Whitepaper Update</title>
     <description><![CDATA[

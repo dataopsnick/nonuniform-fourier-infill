@@ -6,7 +6,14 @@ import unittest
 import numpy as np
 import pandas as pd
 from unittest.mock import patch, mock_open
-from nufi.agent import impute_dataframe, plot_diagnostics, TransformationTracker, TransformationLoggingError
+from nufi.agent import (
+    impute_dataframe,
+    plot_diagnostics,
+    run_tipping_point_analysis,
+    plot_tipping_point,
+    TransformationTracker,
+    TransformationLoggingError,
+)
 
 class TestAgentNativeLayer(unittest.TestCase):
     def setUp(self):
@@ -248,3 +255,75 @@ class TestAgentNativeLayer(unittest.TestCase):
                      pass  # expected for truly malformed input
         if os.path.exists(save_img):
             os.remove(save_img)
+
+    def _make_trial_df(self):
+        rng = np.random.RandomState(0)
+        rows = []
+        for arm, shift in (("Control", 0.0), ("Treatment", 1.0)):
+            for s in range(6):
+                subj = f"{arm}_{s}"
+                traj = shift + 0.1 * np.arange(6) + rng.normal(0, 0.05, 6)
+                for i in range(6):
+                    rows.append({
+                        "arm": arm,
+                        "subject": subj,
+                        "time": float(i),
+                        "outcome": traj[i] if i < 4 else np.nan,
+                    })
+        return pd.DataFrame(rows)
+
+    def test_mnar_dropout_diagnostic_flags(self):
+        t = np.arange(16, dtype=float)
+        y = np.zeros(16, dtype=float)
+        y[3], y[4] = -5.0, -12.0
+        y[10], y[11] = -5.0, -12.0
+        y_nan = y.copy()
+        y_nan[5] = np.nan
+        y_nan[12] = np.nan
+        df = pd.DataFrame({"timestamp": t, "signal": y_nan})
+        _, diag = impute_dataframe(
+            df, time_col="timestamp",
+            log_path=self.test_log, history_dir=self.test_history,
+        )
+        flags = diag["signal"]["stability_flags"]
+        self.assertIn("MNAR_DROPOUT_LEVEL_BIAS", flags)
+
+    def test_tipping_point_analysis_and_plot(self):
+        import nufi.kernels.torch_kernels as tk
+        df = self._make_trial_df()
+        original = tk.solve_tikhonov_nudft
+        counter = {"n": 0}
+
+        def counting(*args, **kwargs):
+            counter["n"] += 1
+            return original(*args, **kwargs)
+
+        with patch("nufi.kernels.torch_kernels.solve_tikhonov_nudft", side_effect=counting):
+            res_small = run_tipping_point_analysis(
+                df, arm_col="arm", outcome_col="outcome",
+                delta_grid=np.array([-3.0, 0.0]), time_col="time",
+                subject_col="subject", n_imputations=6, random_state=42,
+                log_path=self.test_log, history_dir=self.test_history,
+            )
+            small_calls = counter["n"]
+            counter["n"] = 0
+            res_big = run_tipping_point_analysis(
+                df, arm_col="arm", outcome_col="outcome",
+                delta_grid=(np.array([-1.0, 0.0]), np.linspace(-4.0, 0.0, 9)),
+                time_col="time", subject_col="subject", n_imputations=6, random_state=42,
+                log_path=self.test_log, history_dir=self.test_history,
+            )
+            big_calls = counter["n"]
+
+        self.assertEqual(small_calls, big_calls)
+        self.assertEqual(res_big["treatment_effects"].shape, (2, 9))
+        self.assertIsNotNone(res_big["tipping_point"])
+
+        try:
+            import matplotlib
+            matplotlib.use("Agg")
+            save_img = os.path.join(self._tmpdir, "tipping_point.png")
+            plot_tipping_point(res_big, save_path=save_img, show_plot=False)
+            self.assertTrue(os.path.exists(save_img))
+        except ImportError:
+            pass

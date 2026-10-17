@@ -256,3 +256,50 @@ if __name__ == "__main__":
             print(f"Results saved to {filename}")
     except IOError as e:
         print(f"[WARN] Could not save results to disk: {e}")
+
+
+def run_mnar_dropout_benchmark(n_subjects_per_arm: int = 30, n_visits: int = 8, seed: int = 42) -> dict:
+    """Evaluates treatment effect bias and RMSE under informative MNAR clinical dropout (Task 50)."""
+    from nufi.wrappers import infill_rbmi_dataframe
+
+    rng = np.random.RandomState(seed)
+    times = np.arange(n_visits, dtype=float)
+    records, truth = [], {}
+    for arm, effect in (("Control", 0.0), ("Treatment", -0.6)):
+        for s in range(n_subjects_per_arm):
+            subj = f"{arm}_{s}"
+            traj = 0.15 * times + effect * (times / max(1.0, n_visits - 1)) + rng.normal(0, 0.15, n_visits)
+            threshold = np.percentile(traj, 65)
+            drop_idx = next((i for i in range(2, n_visits) if traj[i] > threshold), n_visits)
+            for i in range(n_visits):
+                records.append({
+                    "subject": subj, "arm": arm, "time": times[i],
+                    "outcome": traj[i] if i < drop_idx else np.nan,
+                })
+            truth[subj] = traj
+    long_df = pd.DataFrame(records)
+    true_effect = float(
+        np.mean([v[-1] for k, v in truth.items() if k.startswith("Treatment")])
+        - np.mean([v[-1] for k, v in truth.items() if k.startswith("Control")])
+    )
+
+    start = time.time()
+    cir_df = infill_rbmi_dataframe(
+        long_df, arm_col="arm", reference_arm="Control",
+        subject_col="subject", time_col="time",
+        rbmi_method="CIR", n_imputations=1, stochastic=False,
+    )
+    cir_time = time.time() - start
+    final_t = times[-1]
+    cir_effect = float(
+        cir_df[(cir_df["arm"] == "Treatment") & (cir_df["time"] == final_t)]["outcome"].mean()
+        - cir_df[(cir_df["arm"] == "Control") & (cir_df["time"] == final_t)]["outcome"].mean()
+    )
+    return {
+        "True Effect": true_effect,
+        "NUFI RBMI-CIR": {
+            "Estimated Effect": cir_effect,
+            "Absolute Bias": abs(cir_effect - true_effect),
+            "Runtime (s)": float(cir_time),
+        },
+    }
