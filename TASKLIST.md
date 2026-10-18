@@ -1473,7 +1473,7 @@ to every missingness event.
 +                 flags.append("MNAR_DROPOUT_SLOPE_BIAS")
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>51</id>
     <title>torch_kernels.py:5-17 - Bug: Default MPS device selection breaks the float64/complex128 pipeline on Apple Silicon</title>
     <description><![CDATA[
@@ -1510,7 +1510,7 @@ This alone fails 35 of 37 tests when the suite runs with the stock default devic
 **Acceptance**: `PYTHONPATH=. pytest` collects and runs on Apple Silicon without a "Cannot convert a MPS Tensor to float64 dtype" TypeError from the default device.
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>52</id>
     <title>torch_kernels.py:376-377 - Bug: valid_mask broadcast failure in solve_tikhonov_nudft when n_f != N_val</title>
     <description><![CDATA[
@@ -1540,7 +1540,7 @@ This makes every small-dataset test fail (`test_imputer_numpy`, `test_imputer_pa
 **Acceptance**: `test_imputer_numpy`, `test_imputer_pandas`, `test_stochastic_imputation`, and `test_stochastic_imputation_multicol` pass on CPU.
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>53</id>
     <title>torch_kernels.py:226-229,251 - Bug: np.cov returns a 0-d array for single-channel input, crashing covariance_compensation ("Input must be 1- or 2-d.")</title>
     <description><![CDATA[
@@ -1569,7 +1569,7 @@ Any single-outcome fit with `covariance_compensation=True` hits this. In particu
 **Acceptance**: `test_rbmi_dataframe_methods[CR]`, `[J2R]`, `[CIR]`, `[LMCF]` pass on CPU; a single-channel `NufiImputer(covariance_compensation=True).fit_transform` no longer raises.
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>54</id>
     <title>agent.py:33-41 - Bug: TransformationTracker path guard rejects every log/history path outside the CWD (macOS tempdirs)</title>
     <description><![CDATA[
@@ -1603,7 +1603,7 @@ This fails all 11 `tests/test_agent.py` tests that construct a tracker (the `imp
 **Acceptance**: `tests/test_agent.py` passes on CPU (tracker tests, `impute_dataframe` tests, tipping point test) without weakening the default guard for relative or agent-driven paths.
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>55</id>
     <title>tests/benchmark.py:245-258,261-305 - Bug: run_mnar_dropout_benchmark is never invoked from __main__ and only exercises the RBMI-CIR path</title>
     <description><![CDATA[
@@ -1627,7 +1627,7 @@ and inside `run_mnar_dropout_benchmark`, add the MAR and PMM arms alongside RBMI
 **Acceptance**: `python tests/benchmark.py` prints and saves the MNAR dropout section, containing naive-MAR, `pmm_slope`, and RBMI-CIR rows with bias / RMSE / covariance-error / runtime columns.
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>56</id>
     <title>tests/test_agent.py:291-320 - Fragile assertion: the "zero redundant solves" counter is never asserted non-zero, so the grid-independence check can pass vacuously after an import-style refactor</title>
     <description><![CDATA[

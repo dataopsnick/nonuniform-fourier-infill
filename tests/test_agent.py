@@ -35,7 +35,19 @@ class TestAgentNativeLayer(unittest.TestCase):
         self.test_log = os.path.join(self._tmpdir, "transformations.log")
         self.test_history = os.path.join(self._tmpdir, "history")
 
+        # tempfile.mkdtemp() returns a path outside the CWD on macOS
+        # (/var/folders/... symlinked to /private/var/folders/...). The tracker's
+        # containment guard remains a safety default for agent-driven relative
+        # paths, but these tests explicitly request tempdir paths, so opt out
+        # via the documented override (Task 54).
+        self._prev_unsafe_paths = os.environ.get("NUFI_ALLOW_UNSAFE_PATHS")
+        os.environ["NUFI_ALLOW_UNSAFE_PATHS"] = "1"
+
     def tearDown(self):
+        if self._prev_unsafe_paths is None:
+            os.environ.pop("NUFI_ALLOW_UNSAFE_PATHS", None)
+        else:
+            os.environ["NUFI_ALLOW_UNSAFE_PATHS"] = self._prev_unsafe_paths
         if hasattr(self, "_tmpdir") and os.path.exists(self._tmpdir):
             shutil.rmtree(self._tmpdir, ignore_errors=True)
 
@@ -144,6 +156,19 @@ class TestAgentNativeLayer(unittest.TestCase):
         logged_data = json.loads(lines[0])
         self.assertEqual(logged_data["event"], "test_ping")
         self.assertEqual(logged_data["value"], 42)
+
+    def test_tracker_rejects_outside_cwd_by_default(self):
+        """The containment guard must reject outside-CWD paths unless opted out (Task 54)."""
+        guard_dir = tempfile.mkdtemp(prefix="nufi_guard_")
+        try:
+            with patch.dict(os.environ, {"NUFI_ALLOW_UNSAFE_PATHS": ""}):
+                with self.assertRaises(ValueError):
+                    TransformationTracker(
+                        log_path=os.path.join(guard_dir, "transformations.log"),
+                        history_dir=os.path.join(guard_dir, "history"),
+                    )
+        finally:
+            shutil.rmtree(guard_dir, ignore_errors=True)
 
     def test_tracker_error_enforcement(self):
         # Force a logging error by mocking open to raise an OSError
@@ -316,6 +341,10 @@ class TestAgentNativeLayer(unittest.TestCase):
             big_calls = counter["n"]
 
         self.assertEqual(small_calls, big_calls)
+        # One transform per arm (one outcome column each): the count must be
+        # non-zero AND independent of the delta-grid size (2x2 vs 2x9).
+        self.assertGreaterEqual(small_calls, 2)
+        self.assertLessEqual(big_calls, 8)
         self.assertEqual(res_big["treatment_effects"].shape, (2, 9))
         self.assertIsNotNone(res_big["tipping_point"])
 

@@ -63,11 +63,17 @@ data = {
 df = pd.DataFrame(data).set_index('timestamp')
 
 # 2. Instantiate and fit-transform with NufiImputer
-imputer = NufiImputer(device='mps') # Auto-selects Apple Silicon GPU
+imputer = NufiImputer() # Auto-selects CUDA > MPS > CPU
 infilled_df = imputer.fit_transform(df)
 
 print(infilled_df)
 ```
+
+> **Device selection**: `get_device()` auto-selects CUDA, then MPS, then CPU. Because the
+> NUDFT pipeline hard-codes `float64`/`complex128`, Apple Silicon MPS (which lacks float64
+> support) is probed at selection time and falls back to CPU automatically. Pin the device
+> explicitly with `NufiImputer(device='cpu')` or with the `NUFI_DEVICE` environment variable
+> (e.g. `NUFI_DEVICE=cpu`).
 
 ## 🤖 Agent-Native Layer & Zero-Config API
 

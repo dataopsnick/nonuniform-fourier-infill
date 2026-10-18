@@ -29,10 +29,17 @@ class TransformationTracker:
     Saves snapshots under '.nufi_history/' and logs actions to 'nufi_transformations.log'.
     """
 
-    def __init__(self, log_path: str = "nufi_transformations.log", history_dir: str = ".nufi_history"):
+    def __init__(self, log_path: str = "nufi_transformations.log", history_dir: str = ".nufi_history",
+                 allow_outside_cwd: bool = None):
+        if allow_outside_cwd is None:
+            allow_outside_cwd = os.environ.get(
+                "NUFI_ALLOW_UNSAFE_PATHS", ""
+            ).strip().lower() in ("1", "true", "yes")
         safe_root = os.path.realpath(os.getcwd())
         # Resolve paths and validate immediately:
         for p in (log_path, history_dir):
+            if allow_outside_cwd:
+                break
             resolved = os.path.realpath(p)
             try:
                 if os.path.commonpath([safe_root, resolved]) != safe_root:
@@ -193,7 +200,8 @@ def impute_dataframe(
     max_iter: int = 100,
     tol: float = 1e-5,
     log_path: str = "nufi_transformations.log",
-    history_dir: str = ".nufi_history"
+    history_dir: str = ".nufi_history",
+    allow_outside_cwd: bool = None
 ) -> tuple[pd.DataFrame, dict]:
     """
     High-level, zero-config entrypoint for infilling a Pandas DataFrame.
@@ -230,6 +238,11 @@ def impute_dataframe(
         Path to the transaction log file.
     history_dir : str, default=".nufi_history"
         Directory to save dataframe snapshots.
+    allow_outside_cwd : bool, optional
+        When True, skip the containment guard that normally requires `log_path`
+        and `history_dir` to resolve inside the current working directory. When
+        None (default), the guard is controlled by the ``NUFI_ALLOW_UNSAFE_PATHS``
+        environment variable.
 
     Returns
     -------
@@ -246,7 +259,8 @@ def impute_dataframe(
         raise ValueError(f"time_col '{time_col}' appears multiple times in DataFrame columns. "
                          f"Ensure column names are unique.")
 
-    tracker = TransformationTracker(log_path=log_path, history_dir=history_dir)
+    tracker = TransformationTracker(log_path=log_path, history_dir=history_dir,
+                                    allow_outside_cwd=allow_outside_cwd)
     
     # Take snapshot of original data
     pre_ver = tracker.save_snapshot(df, "pre_infill")
@@ -731,6 +745,7 @@ def run_tipping_point_analysis(
     random_state=None,
     log_path: str = "nufi_transformations.log",
     history_dir: str = ".nufi_history",
+    allow_outside_cwd: bool = None,
 ) -> dict:
     """
     Executes a vectorized MNAR Tipping Point Sensitivity Analysis over delta_grid
@@ -778,7 +793,8 @@ def run_tipping_point_analysis(
     from sklearn.utils import check_random_state
     rng = check_random_state(random_state)
 
-    tracker = TransformationTracker(log_path=log_path, history_dir=history_dir)
+    tracker = TransformationTracker(log_path=log_path, history_dir=history_dir,
+                                    allow_outside_cwd=allow_outside_cwd)
     pre_ver = tracker.save_snapshot(df, "pre_tipping_point")
 
     def _resolve_times(arm_df):
