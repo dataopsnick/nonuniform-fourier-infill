@@ -130,3 +130,24 @@ The `nufi` library has been rigorously compared against standard statistical and
 - **Accuracy (RMSE)**: `nufi` outperforms conventional interpolations and imputation algorithms, as it directly reconstructs the smooth, continuous-time spectrum.
 - **Covariance Preservation**: Using LDLᵀ covariance compensation, `nufi` minimizes structural covariance distortion, outperforming MICE and Splines by over an order of magnitude.
 - **Speed**: PyTorch-accelerated direct NUDFT solves are significantly faster than iterative MICE cycles and Gaussian Processes, rendering it highly scalable for enterprise scale real-time streams.
+
+---
+
+## 📚 Acknowledgements & Citations
+
+The multiple-imputation pooling utilities (`pool_rubins_rules` with the Barnard–Rubin small-sample degrees-of-freedom adjustment) follow the pooling formulation in the R **mice** package. To cite `mice` in publications use:
+
+> van Buuren S, Groothuis-Oudshoorn K (2011). “mice: Multivariate Imputation by Chained Equations in R.” *Journal of Statistical Software*, 45(3), 1-67. doi:10.18637/jss.v045.i03.
+
+```bibtex
+@Article{,
+  title = {{mice}: Multivariate Imputation by Chained Equations in R},
+  author = {Stef {van Buuren} and Karin Groothuis-Oudshoorn},
+  journal = {Journal of Statistical Software},
+  year = {2011},
+  volume = {45},
+  number = {3},
+  pages = {1-67},
+  doi = {10.18637/jss.v045.i03},
+}
+```

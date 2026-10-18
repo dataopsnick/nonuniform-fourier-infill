@@ -1242,6 +1242,237 @@ repository root are ignored. Alternatively, if the project never ships `.log` fi
 assumption clearly so future contributors are aware.
 ]]></description>
   </task>
+  <task status="COMPLETED">
+    <id>46</id>
+    <title>impute.py:18-48,325-336 - Feature: Support Pattern Mixture Models (PMM) and Delta-Adjustment for MNAR Imputation</title>
+    <description><![CDATA[
+### Location: nonuniform-fourier-infill/nufi/impute.py:18-48,325-336
+
+**Feature: Support Pattern Mixture Models (PMM) and Delta-Adjustment for MNAR Imputation.**
+
+Currently, `NufiImputer` reconstructs missing time-series observations under MCAR/MAR assumptions
+using regularized NUDFT and `LDL^T` stochastic posterior injection. In clinical trials and
+econometric panels, data are often Missing Not At Random (MNAR)—for example, patients dropping out
+due to deteriorating health or adverse events, leading to exaggerated treatment effects if imputed
+under MAR.
+
+**Enhancement**: Extend `NufiImputer` to accept `mnar_strategy` (`'pmm_shift'`, `'pmm_slope'`,
+`'spectral_dampening'`) and `delta_adjustment` (float, dict, or array) in `__init__`, `clone`, and
+`transform`:
+- `pmm_shift`: Apply an additive location shift `delta` to missing observations.
+- `pmm_slope`: Apply a time-proportional drift `delta * (t - t_last_obs)` after dropout so the
+  trajectory preserves $C^0$ continuity at the dropout boundary while modeling post-dropout
+  deterioration/recovery.
+- `spectral_dampening`: Attenuate high-frequency spectral coefficients `F` in missing intervals.
+
+      def __init__(self, method='direct', device=None, covariance_compensation=True, 
+-                  n_frequencies=None, alpha=1e-4, solver='direct', max_iter=100, tol=1e-5, random_state=None):
++                  n_frequencies=None, alpha=1e-4, solver='direct', max_iter=100, tol=1e-5, random_state=None,
++                  mnar_strategy=None, delta_adjustment=0.0):
+          self.method = method
+          self.device = device
+          self.covariance_compensation = covariance_compensation
+          self.n_frequencies = n_frequencies
+          self.alpha = alpha
+          self.solver = solver
+          self.max_iter = max_iter
+          self.tol = tol
+          self.random_state = random_state
++         self.mnar_strategy = mnar_strategy
++         self.delta_adjustment = delta_adjustment
+
+          # Fill NaNs with the reconstructed signal + MNAR delta adjustment + correlated noise
+          for col_idx in range(n_cols):
+              if col_idx not in local_reconstructed:
+                  infilled_data[:, col_idx] = X_data[:, col_idx]
+                  continue
+                  
+              nan_mask = np.isnan(X_data[:, col_idx])
+-             imputed_vals = local_reconstructed[col_idx][nan_mask] + noise_correlated[nan_mask, col_idx]
++             delta_col = self.delta_adjustment.get(col_idx, 0.0) if isinstance(self.delta_adjustment, dict) else self.delta_adjustment
++             if self.mnar_strategy == 'pmm_shift':
++                 mnar_offset = delta_col
++             elif self.mnar_strategy == 'pmm_slope':
++                 obs_ts = t_timestamps[~nan_mask]
++                 t_last_obs = np.max(obs_ts) if len(obs_ts) > 0 else t_timestamps[0]
++                 mnar_offset = delta_col * np.maximum(0.0, t_timestamps[nan_mask] - t_last_obs)
++             else:
++                 mnar_offset = 0.0
++             imputed_vals = local_reconstructed[col_idx][nan_mask] + mnar_offset + noise_correlated[nan_mask, col_idx]
+              X_data[nan_mask, col_idx] = imputed_vals
+]]></description>
+  </task>
+  <task status="COMPLETED">
+    <id>47</id>
+    <title>wrappers.py:302-360 - Feature: Reference-Based Multiple Imputation (RBMI: J2R, CIR, CR, LMCF)</title>
+    <description><![CDATA[
+### Location: nonuniform-fourier-infill/nufi/wrappers.py:302-360
+
+**Feature: Reference-Based Multiple Imputation (RBMI: J2R, CIR, CR, LMCF) in `nufi/wrappers.py`.**
+
+Biostatisticians analyzing longitudinal clinical trials under ICH E9(R1) treatment policy or
+hypothetical estimands rely on Reference-Based Multiple Imputation (Carpenter, Roger, & Kenward,
+2013) to handle treatment discontinuation. `nufi` currently lacks group-reference imputation
+workflows in `nufi/wrappers.py`.
+
+**Enhancement**: Implement `infill_rbmi_dataframe` in `nufi/wrappers.py` supporting standard
+regulatory RBMI mechanisms:
+- **Copy Reference (`CR`)**: Impute missing values in the active arm using the NUDFT spectrum
+  `F_ref` and `LDL^T` covariance `Sigma_ref` fitted on the reference/placebo arm.
+- **Jump to Reference (`J2R`)**: Pre-dropout follows the active arm's spectrum; post-dropout
+  ($t > t_d$) jumps to the reference arm's NUDFT mean trajectory plus correlated noise from
+  `Sigma_ref`.
+- **Copy Increments in Reference (`CIR`)**: Post-dropout ($t > t_d$) anchors at the subject's last
+  observed value at $t_d$ and evolves according to the reference arm's Fourier derivative
+  $\int_{t_d}^t \dot{x}_{\text{ref}}(\tau)\,d\tau = x_{\text{ref}}(t) - x_{\text{ref}}(t_d)$,
+  preserving smooth $C^\infty$ increments and $C^0$ boundary continuity.
+- **Last Mean Carried Forward (`LMCF`)**: Post-dropout mean is held constant at the active arm's
+  NUDFT value at $t_d$ plus stochastic posterior noise.
+
++ def infill_rbmi_dataframe(
++     df: pd.DataFrame,
++     arm_col: str,
++     reference_arm: str,
++     subject_col: str = None,
++     time_col: str = None,
++     rbmi_method: str = "J2R",
++     imputer: NufiImputer = None,
++     stochastic: bool = True,
++     n_imputations: int = 1
++ ):
++     """
++     Infill a clinical trial longitudinal DataFrame using Reference-Based Multiple Imputation (RBMI).
++     Supports 'CR' (Copy Reference), 'J2R' (Jump to Reference), 'CIR' (Copy Increments in Reference),
++     and 'LMCF' (Last Mean Carried Forward).
++     """
++     if rbmi_method not in ("CR", "J2R", "CIR", "LMCF"):
++         raise ValueError(f"Unsupported rbmi_method '{rbmi_method}'. Expected one of: 'CR', 'J2R', 'CIR', 'LMCF'.")
+]]></description>
+  </task>
+  <task status="COMPLETED">
+    <id>48</id>
+    <title>agent.py:424-480 - Feature: Fast Vectorized Tipping Point Sensitivity Analysis & Contour Plotting</title>
+    <description><![CDATA[
+### Location: nonuniform-fourier-infill/nufi/agent.py:424-480
+
+**Feature: Fast Vectorized Tipping Point Sensitivity Analysis & Contour Plotting.**
+
+To evaluate the robustness of clinical trial conclusions to MNAR assumptions, biostatisticians run
+Tipping Point Sensitivity Analyses, sweeping across a grid of $(\delta_{\text{control}},
+\delta_{\text{treatment}})$ penalties to find the exact threshold $\delta^*$ where $p \ge 0.05$. In
+traditional GP or MICE pipelines, re-fitting across a $20 \times 20$ grid with $M=100$ imputations
+requires $40,000$ model fits. Because `nufi` separates the deterministic NUDFT spectral solve from
+the `LDL^T` stochastic posterior injection, `nufi` can evaluate the entire tipping point surface
+in milliseconds without re-solving the NUDFT.
+
+**Enhancement**:
+1. Implement `run_tipping_point_analysis()` in `nufi/agent.py` to fit `NufiImputer` once per arm,
+   vectorize the evaluation of `delta_grid` across $M$ stochastic posterior draws, pool treatment
+   effect estimates and $p$-values at each grid coordinate via Rubin's Rules, and record the run in
+   `TransformationTracker`.
+2. Implement `plot_tipping_point()` in `nufi/agent.py` to render a 2D heatmap/contour plot of pooled
+   treatment effects and significance regions ($p < 0.05$ vs $p \ge 0.05$).
+
++ def run_tipping_point_analysis(
++     df: pd.DataFrame,
++     arm_col: str,
++     outcome_col: str,
++     delta_grid: np.ndarray,
++     time_col: str = None,
++     n_imputations: int = 50,
++     alpha_level: float = 0.05,
++     log_path: str = "nufi_transformations.log",
++     history_dir: str = ".nufi_history"
++ ) -> dict:
++     """
++     Executes a vectorized MNAR Tipping Point Sensitivity Analysis over delta_grid without
++     redundant NUDFT spectral solves, pooling p-values via Rubin's Rules to find delta*.
++     """
+]]></description>
+  </task>
+  <task status="COMPLETED">
+    <id>49</id>
+    <title>impute.py:216-340 - Feature: Batch Multiple Imputation (M Draws) and Rubin's Rules Pooling Utility</title>
+    <description><![CDATA[
+### Location: nonuniform-fourier-infill/nufi/impute.py:216-340
+
+**Feature: Batch Multiple Imputation ($M$ Draws) and Rubin's Rules Pooling Utility.**
+
+`NufiImputer.transform(X, stochastic=True)` currently returns a single stochastic realization. For
+valid frequentist or Bayesian inference under MAR/MNAR (and for RBMI / Tipping Point workflows),
+users need to draw $M$ imputed datasets and pool parameter estimates and standard errors using
+Rubin's Rules (1987).
+
+**Enhancement**:
+1. Add `n_imputations: int = 1` to `NufiImputer.transform()`. When `n_imputations > 1` and
+   `stochastic=True`, vectorize the generation of correlated noise across $M$ draws and return a
+   list of $M$ imputed DataFrames (or a 3D array of shape `(M, n_samples, n_cols)`).
+2. Implement `pool_rubins_rules(estimates, variances, confidence_level=0.95, n_obs=None)` in
+   `nufi/impute.py` returning `pooled_estimate` ($\bar{Q}$), `within_variance` ($\bar{U}$),
+   `between_variance` ($B$), `total_variance` ($T$), Barnard-Rubin adjusted `dof`, `fmi` (Fraction
+   of Missing Information), `t_stat`, `p_value`, and `ci_bounds`.
+
+-     def transform(self, X, timestamps=None, stochastic=False, stochastic_scale=1.0):
++     def transform(self, X, timestamps=None, stochastic=False, stochastic_scale=1.0, n_imputations=1):
++         if n_imputations < 1:
++             raise ValueError(f"n_imputations must be >= 1, got {n_imputations}")
++
++ def pool_rubins_rules(estimates, variances, confidence_level=0.95, n_obs=None) -> dict:
++     """
++     Pools M point estimates and their within-imputation variances using Rubin's Rules (1987).
++     """
++     q = np.asarray(estimates, dtype=np.float64)
++     u = np.asarray(variances, dtype=np.float64)
++     M = len(q)
++     if M < 2:
++         raise ValueError("Rubin's Rules pooling requires at least M >= 2 imputations.")
++     q_bar = float(np.mean(q))
++     u_bar = float(np.mean(u))
++     b = float(np.var(q, ddof=1))
++     total_var = u_bar + (1.0 + 1.0 / M) * b
+]]></description>
+  </task>
+  <task status="COMPLETED">
+    <id>50</id>
+    <title>agent.py:390-415 - Feature: Pre-Dropout Derivative MNAR Diagnostics (Diggle-Kenward) & Whitepaper Update</title>
+    <description><![CDATA[
+### Location: nonuniform-fourier-infill/nufi/agent.py:390-415
+
+**Feature: Pre-Dropout Derivative MNAR Diagnostics (Diggle-Kenward) & Whitepaper Update.**
+
+When missingness depends on the rate of change $\dot{x}(t)$ or level $x(t)$ right before dropout
+(Diggle & Kenward, 1994), standard MAR imputation produces severe bias. Since `nufi` reconstructs a
+$C^\infty$ trigonometric representation, we have closed-form access to the exact instantaneous
+velocity $\dot{x}(t) = \operatorname{Re}\left(\sum_k 2\pi i f_k c_k e^{2\pi i f_k t}\right)$ prior
+to every missingness event.
+
+**Enhancement**:
+1. In `nufi/agent.py` (`impute_dataframe`), compute the analytical Fourier first derivative
+   $\dot{x}(t)$ at observed timestamps immediately preceding NaN gaps.
+2. Test for statistical association between missingness onset and pre-dropout signal level/slope,
+   appending `"MNAR_DROPOUT_LEVEL_BIAS"` and `"MNAR_DROPOUT_SLOPE_BIAS"` to
+   `diagnostics[col_name]["stability_flags"]`.
+3. Update `nufi/paper/main.tex` with a formal section on Continuous-Time Spectral Pattern Mixture
+   Models, Reference-Based Fourier Increment Integration (CIR), and Tipping Point analysis.
+4. Add an MNAR clinical dropout benchmark scenario to `tests/benchmark.py`.
+
+          if opt_alpha <= 1e-6:
+              flags.append("POTENTIAL_OVERFIT_LOW_REGULARIZATION")
+          elif opt_alpha >= 5.0:
+              flags.append("HIGH_REGULARIZATION")
++         
++         # Diggle-Kenward pre-dropout level and Fourier derivative MNAR check
++         nan_mask_col = np.isnan(col_data)
++         pre_dropout_idx = np.where(~nan_mask_col[:-1] & nan_mask_col[1:])[0]
++         if len(pre_dropout_idx) >= 2 and N_val >= 6:
++             deriv_coeffs = 2.0j * np.pi * f_k * F_np
++             dx_dt = np.real(np.sum(deriv_coeffs[None, :] * np.exp(2.0j * np.pi * timestamps[:, None] * f_k[None, :]), axis=1))
++             if np.abs(np.mean(col_data[pre_dropout_idx]) - np.nanmean(col_data)) > 1.5 * (np.nanstd(col_data) + 1e-12):
++                 flags.append("MNAR_DROPOUT_LEVEL_BIAS")
++             if np.abs(np.mean(dx_dt[pre_dropout_idx]) - np.mean(dx_dt[~nan_mask_col])) > 1.5 * (np.std(dx_dt[~nan_mask_col]) + 1e-12):
++                 flags.append("MNAR_DROPOUT_SLOPE_BIAS")
+]]></description>
+  </task>
 </tasklist>
 
 ```

@@ -1,8 +1,8 @@
 import numpy as np
 import pandas as pd
 import pytest
-from nufi.impute import NufiImputer
-from nufi.wrappers import infill_dataframe, infill_multiindex_dataframe
+from nufi.impute import NufiImputer, pool_rubins_rules
+from nufi.wrappers import infill_dataframe, infill_multiindex_dataframe, infill_rbmi_dataframe
 
 def test_infill_dataframe_wrapper():
     # Dedicated test for infill_dataframe (Task 18)
@@ -270,3 +270,111 @@ def test_imputer_edge_cases():
     with pytest.raises(ValueError):
         bad_imputer = NufiImputer(alpha=0.0)
         bad_imputer.fit_transform(X_no_nans)
+
+
+def _pmm_series():
+    t = np.arange(12, dtype=np.float64)
+    y = np.sin(0.7 * t) + 0.3 * t
+    X = y.reshape(-1, 1).copy()
+    X[3, 0] = np.nan
+    X[8:, 0] = np.nan
+    return t, X
+
+
+def test_pmm_shift_observed_invariance_and_offset():
+    t, X = _pmm_series()
+    imputer = NufiImputer(
+        method="direct", alpha=1e-4, covariance_compensation=False,
+        random_state=42, mnar_strategy="pmm_shift", delta_adjustment=2.5,
+    )
+    imputer.fit(X)
+    base = imputer.transform(X, stochastic=False, delta_adjustment=0.0)
+    shifted = imputer.transform(X, stochastic=False)
+    nan_mask = np.isnan(X[:, 0])
+    assert np.array_equal(base[~nan_mask], shifted[~nan_mask])
+    np.testing.assert_allclose(shifted[nan_mask, 0] - base[nan_mask, 0], 2.5, rtol=1e-12)
+
+
+def test_pmm_slope_and_spectral_dampening():
+    t, X = _pmm_series()
+    nan_mask = np.isnan(X[:, 0])
+    imputer = NufiImputer(
+        method="direct", alpha=1e-4, covariance_compensation=False,
+        random_state=42, mnar_strategy="pmm_slope", delta_adjustment=0.0,
+    )
+    imputer.fit(X)
+    zero = imputer.transform(X, stochastic=False)
+    slope = imputer.transform(X, stochastic=False, delta_adjustment=0.5)
+    diff = slope[nan_mask, 0] - zero[nan_mask, 0]
+    expected = 0.5 * np.maximum(0.0, t[nan_mask] - 7.0)
+    expected[np.where(nan_mask)[0] == 3] = 0.5 * (3.0 - 2.0)
+    np.testing.assert_allclose(diff, expected, rtol=1e-12)
+
+    imp_damp = NufiImputer(
+        method="direct", alpha=1e-4, covariance_compensation=False,
+        random_state=42, mnar_strategy="spectral_dampening", delta_adjustment=0.0,
+    )
+    imp_damp.fit(X)
+    f0 = imp_damp.transform(X, stochastic=False, delta_adjustment=0.0)
+    F0 = imp_damp.coefficients_[0].copy()
+    f_k = imp_damp.frequencies_[0]
+    f3 = imp_damp.transform(X, stochastic=False, delta_adjustment=3.0)
+    F3 = imp_damp.coefficients_[0]
+    expected_w = np.exp(-3.0 * (f_k / f_k.max()) ** 2)
+    np.testing.assert_allclose(np.abs(F3), np.abs(F0) * expected_w, rtol=1e-9)
+    assert np.array_equal(f0[~nan_mask], f3[~nan_mask])
+
+
+def test_batch_multiple_imputations_and_rubins_rules():
+    X = np.array([[1.0], [np.nan], [3.0], [np.nan], [5.0], [np.nan], [7.0]], dtype=np.float64)
+    imputer = NufiImputer(method="direct", alpha=1e-4, covariance_compensation=False, random_state=42)
+    imputer.fit(X)
+    draws = imputer.transform(X, stochastic=True, n_imputations=5)
+    assert isinstance(draws, np.ndarray) and draws.shape == (5, 7, 1)
+    assert not np.array_equal(draws[0], draws[1])
+    np.testing.assert_array_equal(draws, imputer.transform(X, stochastic=True, n_imputations=5))
+
+    q = np.array([1.0, 2.0, 4.0])
+    u = np.array([0.5, 0.5, 0.5])
+    res = pool_rubins_rules(q, u, n_obs=30)
+    M = 3
+    q_bar, u_bar, b = q.mean(), u.mean(), np.var(q, ddof=1)
+    T = u_bar + (1.0 + 1.0 / M) * b
+    lam = (1.0 + 1.0 / M) * b / T
+    dfcom = 29.0
+    tmp = (1.0 - lam) * (1.0 + dfcom) * dfcom
+    dof_br = (M - 1) * tmp / ((dfcom + 3.0) * (M - 1) + (lam**2) * tmp)
+    r = (1.0 + 1.0 / M) * b / u_bar
+    fmi = (r + 2.0 / (dof_br + 3.0)) / (1.0 + r)
+    assert np.isclose(res["pooled_estimate"], q_bar, rtol=1e-6)
+    assert np.isclose(res["total_variance"], T, rtol=1e-6)
+    assert np.isclose(res["dof"], dof_br, rtol=1e-6)
+    assert np.isclose(res["fmi"], fmi, rtol=1e-6)
+
+
+@pytest.mark.parametrize("method", ["CR", "J2R", "CIR", "LMCF"])
+def test_rbmi_dataframe_methods(method):
+    rng = np.random.RandomState(7)
+    times = np.arange(8, dtype=np.float64)
+    rows = []
+    for arm, base in (("Placebo", 0.0), ("Active", 1.5)):
+        for s in range(4):
+            subj = f"{arm}_{s}"
+            traj = base + 0.3 * times + 0.1 * np.sin(times) + rng.normal(0, 0.05, len(times))
+            last_obs = 4 if arm == "Active" else 7
+            for i, t in enumerate(times):
+                rows.append({
+                    "subject": subj, "arm": arm, "time": t,
+                    "outcome": traj[i] if i <= last_obs else np.nan,
+                })
+    df = pd.DataFrame(rows)
+    out = infill_rbmi_dataframe(
+        df, arm_col="arm", reference_arm="Placebo",
+        subject_col="subject", time_col="time",
+        rbmi_method=method, n_imputations=3, stochastic=True, random_state=1,
+    )
+    assert isinstance(out, list) and len(out) == 3
+    obs_mask = df["outcome"].notna()
+    for d in out:
+        assert not d["outcome"].isna().any()
+        np.testing.assert_array_equal(d.loc[obs_mask, "outcome"].to_numpy(), df.loc[obs_mask, "outcome"].to_numpy())

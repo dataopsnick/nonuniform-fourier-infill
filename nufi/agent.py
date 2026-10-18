@@ -8,7 +8,12 @@ import torch
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from nufi.impute import NufiImputer
+from nufi.impute import (
+    NufiImputer,
+    pool_rubins_rules,
+    compute_mnar_offsets,
+    evaluate_fourier_derivative,
+)
 from nufi.kernels.torch_kernels import get_device, solve_tikhonov_nudft
 
 class TransformationLoggingError(Exception):
@@ -390,8 +395,10 @@ def impute_dataframe(
         f_k = np.linspace(0, nyquist_frequency, n_f)
 
         if len(v_data) > 0 and hasattr(imputer, 'reconstructed_') and col_idx in imputer.reconstructed_:
-            reconstructed_np = imputer.reconstructed_[col_idx][valid_mask]
-            F_np = imputer.coefficients_[col_idx]
+            recon_valid = np.asarray(imputer.reconstructed_[col_idx])[valid_mask]
+            valid_ts = np.asarray(timestamps)[valid_mask]
+            reconstructed_np = recon_valid[np.argsort(valid_ts)]
+            F_np = np.asarray(imputer.coefficients_[col_idx])
         else:
             # WARNING: fallback PSD does NOT apply covariance compensation.
             # SNR/entropy/flags may differ from the actual compensated imputation.
@@ -439,6 +446,31 @@ def impute_dataframe(
             flags.append("POTENTIAL_OVERFIT_LOW_REGULARIZATION")
         elif opt_alpha >= 5.0:
             flags.append("HIGH_REGULARIZATION")
+
+        # --- Diggle-Kenward pre-dropout MNAR diagnostics (Task 50) ---
+        nan_mask_col = np.isnan(col_data)
+        pre_dropout_idx = np.where(~nan_mask_col[:-1] & nan_mask_col[1:])[0]
+        if len(pre_dropout_idx) >= 2 and N_val >= 6:
+            dx_dt = evaluate_fourier_derivative(F_np, f_k, timestamps)
+            obs_mask_col = ~nan_mask_col & ~np.isnan(timestamps)
+            obs_level = col_data[obs_mask_col]
+            level_std = float(np.std(obs_level))
+            if (
+                obs_level.size > 0
+                and level_std > 0.0
+                and abs(np.mean(col_data[pre_dropout_idx]) - np.mean(obs_level))
+                > 1.5 * level_std
+            ):
+                flags.append("MNAR_DROPOUT_LEVEL_BIAS")
+            obs_deriv = dx_dt[obs_mask_col]
+            if obs_deriv.size >= 2:
+                deriv_std = float(np.std(obs_deriv))
+                if (
+                    deriv_std > 0.0
+                    and abs(np.mean(dx_dt[pre_dropout_idx]) - np.mean(obs_deriv))
+                    > 1.5 * deriv_std
+                ):
+                    flags.append("MNAR_DROPOUT_SLOPE_BIAS")
 
         if not flags:
             flags.append("STABLE")
@@ -662,3 +694,297 @@ def plot_diagnostics(
     else:
         plt.close()
     return fig, axes
+
+
+def _parse_delta_grid(delta_grid):
+    """Normalizes delta_grid into (control_deltas, treatment_deltas) 1-D axes."""
+    if (
+        isinstance(delta_grid, (tuple, list))
+        and len(delta_grid) == 2
+        and all(isinstance(g, (list, np.ndarray)) for g in delta_grid)
+    ):
+        control = np.unique(np.asarray(delta_grid[0], dtype=np.float64).ravel())
+        treatment = np.unique(np.asarray(delta_grid[1], dtype=np.float64).ravel())
+        return control, treatment
+    arr = np.asarray(delta_grid, dtype=np.float64)
+    if arr.ndim == 1:
+        return np.array([0.0]), np.unique(arr)
+    if arr.ndim == 2:
+        return np.unique(arr[:, 0]), np.unique(arr[0, :])
+    raise ValueError(
+        "delta_grid must be a 1-D array, a 2-D (n_control, n_treatment) array, "
+        "or a tuple of two 1-D arrays."
+    )
+
+
+def run_tipping_point_analysis(
+    df: pd.DataFrame,
+    arm_col: str,
+    outcome_col: str,
+    delta_grid,
+    time_col: str = None,
+    n_imputations: int = 50,
+    alpha_level: float = 0.05,
+    subject_col: str = None,
+    reference_arm=None,
+    mnar_strategy: str = "pmm_shift",
+    random_state=None,
+    log_path: str = "nufi_transformations.log",
+    history_dir: str = ".nufi_history",
+) -> dict:
+    """
+    Executes a vectorized MNAR Tipping Point Sensitivity Analysis over delta_grid
+    without redundant NUDFT spectral solves, pooling p-values via Rubin's Rules
+    to identify the tipping point boundary delta* (Task 48).
+    """
+    if not isinstance(df, pd.DataFrame):
+        raise TypeError("df must be a pandas DataFrame")
+    if df.empty:
+        raise ValueError("df cannot be empty")
+    for col in (arm_col, outcome_col):
+        if col not in df.columns:
+            raise KeyError(f"Column '{col}' not found in DataFrame columns: {list(df.columns)}")
+    if subject_col is not None and subject_col not in df.columns:
+        raise KeyError(f"subject_col '{subject_col}' not found in DataFrame columns: {list(df.columns)}")
+    if time_col is not None and time_col not in df.columns:
+        raise KeyError(f"time_col '{time_col}' not found in DataFrame columns: {list(df.columns)}")
+    if not isinstance(n_imputations, (int, np.integer)) or n_imputations < 2:
+        raise ValueError("n_imputations must be an integer >= 2 for Rubin's Rules pooling.")
+    if not (0.0 < float(alpha_level) < 1.0):
+        raise ValueError(f"alpha_level must be in (0, 1); got {alpha_level}")
+    if mnar_strategy not in ("pmm_shift", "pmm_slope"):
+        raise ValueError("run_tipping_point_analysis supports 'pmm_shift' or 'pmm_slope'.")
+
+    control_deltas, treatment_deltas = _parse_delta_grid(delta_grid)
+    if control_deltas.size == 0 or treatment_deltas.size == 0:
+        raise ValueError("delta_grid must contain at least one value per axis.")
+    if not (np.all(np.isfinite(control_deltas)) and np.all(np.isfinite(treatment_deltas))):
+        raise ValueError("delta_grid must contain only finite values.")
+
+    arm_values = pd.unique(df[arm_col])
+    if reference_arm is not None:
+        if reference_arm not in arm_values:
+            raise ValueError(f"reference_arm {reference_arm!r} not found in '{arm_col}'.")
+        control_arm = reference_arm
+        others = [a for a in arm_values if a != reference_arm]
+        if not others:
+            raise ValueError("No treatment arm available besides the reference arm.")
+        treatment_arm = others[0]
+    else:
+        if len(arm_values) < 2:
+            raise ValueError(f"Tipping point analysis requires at least two arms in '{arm_col}'.")
+        control_arm, treatment_arm = arm_values[0], arm_values[1]
+
+    from sklearn.utils import check_random_state
+    rng = check_random_state(random_state)
+
+    tracker = TransformationTracker(log_path=log_path, history_dir=history_dir)
+    pre_ver = tracker.save_snapshot(df, "pre_tipping_point")
+
+    def _resolve_times(arm_df):
+        if time_col is not None:
+            t_vals = pd.to_numeric(arm_df[time_col], errors="coerce")
+            if t_vals.isna().any():
+                raise ValueError(f"Column '{time_col}' contains non-numeric / NaN timestamps.")
+            return t_vals.to_numpy(dtype=np.float64)
+        try:
+            t_vals = arm_df.index.to_numpy(dtype=np.float64)
+        except (TypeError, ValueError):
+            raise TypeError("DataFrame index must be numeric when time_col is None.")
+        if np.isnan(t_vals).any():
+            raise ValueError("Index contains NaN timestamps.")
+        return t_vals
+
+    def _fit_arm(arm_label):
+        arm_df = df[df[arm_col] == arm_label]
+        if arm_df.empty:
+            raise ValueError(f"Arm {arm_label!r} has no rows.")
+        t_vals = _resolve_times(arm_df)
+        subj_vals = (
+            arm_df[subject_col].to_numpy()
+            if subject_col is not None
+            else np.full(len(arm_df), "__arm_series__")
+        )
+        wide = pd.DataFrame(
+            {"time": t_vals, "subject": subj_vals, "value": arm_df[outcome_col].to_numpy(dtype=np.float64)}
+        )
+        pivot = wide.pivot_table(index="time", columns="subject", values="value", aggfunc="mean").sort_index()
+        pivot = pivot.dropna(axis=1, how="all")
+        if pivot.empty:
+            raise ValueError(f"Arm {arm_label!r} has no observed outcome values.")
+        times_arm = pivot.index.to_numpy(dtype=np.float64)
+        matrix = pivot.to_numpy(dtype=np.float64)
+
+        arm_imputer = NufiImputer(
+            n_frequencies="auto",
+            alpha="auto",
+            random_state=int(rng.randint(0, 2**31 - 1)),
+        )
+        arm_imputer.fit(pivot, timestamps=times_arm)
+        base = arm_imputer.transform(pivot, timestamps=times_arm, stochastic=False).to_numpy(dtype=np.float64)
+        noise = arm_imputer.sample_posterior_noise(len(times_arm), int(n_imputations), rng=rng)
+        if noise.ndim == 2:
+            noise = noise[None, :, :]
+
+        miss_mask = np.isnan(matrix)
+        offsets_unit = np.zeros_like(matrix)
+        for j in range(matrix.shape[1]):
+            offsets_unit[:, j] = compute_mnar_offsets(mnar_strategy, 1.0, times_arm, miss_mask[:, j])
+
+        return {
+            "base_mean": base.mean(axis=0),
+            "unit_mean": offsets_unit.mean(axis=0),
+            "noise_mean": (noise * miss_mask.astype(np.float64)[None, :, :]).mean(axis=1),
+            "n_subjects": matrix.shape[1],
+        }
+
+    stats_control = _fit_arm(control_arm)
+    stats_treatment = _fit_arm(treatment_arm)
+
+    C_mesh, T_mesh = np.meshgrid(control_deltas, treatment_deltas, indexing="ij")
+    effects = np.zeros(C_mesh.shape)
+    p_values = np.zeros(C_mesh.shape)
+
+    base_c = stats_control["base_mean"][None, :]
+    unit_c = stats_control["unit_mean"][None, :]
+    noise_c = stats_control["noise_mean"]
+    base_t = stats_treatment["base_mean"][None, :]
+    unit_t = stats_treatment["unit_mean"][None, :]
+    noise_t = stats_treatment["noise_mean"]
+    n_c = stats_control["n_subjects"]
+    n_t = stats_treatment["n_subjects"]
+
+    for i, d_c in enumerate(control_deltas):
+        endpoints_c = base_c + d_c * unit_c + noise_c
+        var_c = endpoints_c.var(axis=1, ddof=1) / n_c if n_c > 1 else np.full(n_imputations, 1e-6)
+        mean_c = endpoints_c.mean(axis=1)
+        for j, d_t in enumerate(treatment_deltas):
+            endpoints_t = base_t + d_t * unit_t + noise_t
+            var_t = endpoints_t.var(axis=1, ddof=1) / n_t if n_t > 1 else np.full(n_imputations, 1e-6)
+            q = endpoints_t.mean(axis=1) - mean_c
+            u = var_t + var_c
+            pooled = pool_rubins_rules(q, u, n_obs=max(n_c + n_t, 3))
+            effects[i, j] = pooled["pooled_estimate"]
+            p_values[i, j] = pooled["p_value"]
+
+    significant = p_values < alpha_level
+    tipping_point = None
+    if (~significant).any():
+        dist = np.sqrt(C_mesh**2 + T_mesh**2)
+        dist_masked = np.where(~significant, dist, np.inf)
+        i0, j0 = np.unravel_index(np.argmin(dist_masked), dist.shape)
+        tipping_point = {
+            "control_delta": float(C_mesh[i0, j0]),
+            "treatment_delta": float(T_mesh[i0, j0]),
+            "pooled_effect": float(effects[i0, j0]),
+            "p_value": float(p_values[i0, j0]),
+        }
+
+    log_entry = {
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "event": "tipping_point_analysis",
+        "pre_infill_version": pre_ver,
+        "parameters": {
+            "arm_col": arm_col,
+            "outcome_col": outcome_col,
+            "control_arm": str(control_arm),
+            "treatment_arm": str(treatment_arm),
+            "mnar_strategy": mnar_strategy,
+            "n_imputations": int(n_imputations),
+            "alpha_level": float(alpha_level),
+            "grid_shape": [int(effects.shape[0]), int(effects.shape[1])],
+            "control_deltas": [float(x) for x in control_deltas],
+            "treatment_deltas": [float(x) for x in treatment_deltas],
+        },
+        "tipping_point": tipping_point,
+    }
+    tracker.log_transformation(log_entry)
+
+    return {
+        "control_deltas": control_deltas,
+        "treatment_deltas": treatment_deltas,
+        "treatment_effects": effects,
+        "p_values": p_values,
+        "significant": significant,
+        "tipping_point": tipping_point,
+        "alpha_level": float(alpha_level),
+        "n_imputations": int(n_imputations),
+        "mnar_strategy": mnar_strategy,
+        "arms": {"control": control_arm, "treatment": treatment_arm},
+    }
+
+
+def plot_tipping_point(results, save_path=None, show_plot=True, cmap="RdBu_r", ax=None):
+    """
+    Renders a publication-ready contour/heatmap of pooled treatment effects and
+    p-value significance boundaries from run_tipping_point_analysis (Task 48).
+    """
+    required = ("control_deltas", "treatment_deltas", "treatment_effects", "p_values", "alpha_level")
+    missing = [k for k in required if k not in results]
+    if missing:
+        raise ValueError(f"results dict is missing required keys: {missing}")
+
+    c = np.asarray(results["control_deltas"], dtype=np.float64).ravel()
+    t = np.asarray(results["treatment_deltas"], dtype=np.float64).ravel()
+    effects = np.asarray(results["treatment_effects"], dtype=np.float64)
+    p_values = np.asarray(results["p_values"], dtype=np.float64)
+    alpha = float(results["alpha_level"])
+    tipping = results.get("tipping_point")
+
+    if effects.size == 0 or (len(c) == 1 and len(t) == 1):
+        raise ValueError("delta_grid must contain at least two coordinates to plot.")
+
+    if len(c) == 1 or len(t) == 1:
+        if len(c) == 1:
+            x, eff, pv = t, effects.reshape(len(c), len(t))[0], p_values.reshape(len(c), len(t))[0]
+            xlabel = "Treatment-arm delta"
+        else:
+            x, eff, pv = c, effects.reshape(len(c), len(t))[:, 0], p_values.reshape(len(c), len(t))[:, 0]
+            xlabel = "Control-arm delta"
+        fig, ax = plt.subplots(figsize=(8, 5))
+        ax.plot(x, eff, color="#1f77b4", lw=2, marker="o", label="Pooled treatment effect")
+        ax.set_xlabel(xlabel)
+        ax.set_ylabel("Pooled treatment effect", color="#1f77b4")
+        ax.grid(True, linestyle="--", alpha=0.5)
+        ax2 = ax.twinx()
+        ax2.plot(x, pv, color="#d62728", lw=2, marker="s", label="Pooled p-value")
+        ax2.axhline(alpha, color="#d62728", ls="--", lw=1.2)
+        ax2.set_ylabel("Pooled p-value", color="#d62728")
+        if tipping is not None:
+            tip_x = tipping["treatment_delta"] if len(c) == 1 else tipping["control_delta"]
+            ax.axvline(tip_x, color="black", ls=":", lw=1.5)
+        ax.set_title("Tipping Point Sensitivity Analysis (1-D sweep)")
+    else:
+        if ax is None:
+            fig, ax = plt.subplots(figsize=(8, 6))
+        else:
+            fig = ax.figure
+        cf = ax.contourf(t, c, effects, levels=20, cmap=cmap)
+        fig.colorbar(cf, ax=ax, label="Pooled treatment effect")
+        try:
+            cs = ax.contour(t, c, p_values, levels=[alpha], colors="black", linewidths=1.6)
+            ax.clabel(cs, fmt={alpha: f"p = {alpha:g}"})
+        except Exception:
+            pass
+        if tipping is not None:
+            ax.scatter(
+                [tipping["treatment_delta"]],
+                [tipping["control_delta"]],
+                marker="X",
+                s=140,
+                color="black",
+                zorder=5,
+                label=f"delta* = ({tipping['control_delta']:g}, {tipping['treatment_delta']:g})",
+            )
+            ax.legend(loc="upper right")
+        ax.set_xlabel("Treatment-arm delta")
+        ax.set_ylabel("Control-arm delta")
+        ax.set_title("Tipping Point Sensitivity Analysis")
+
+    if save_path is not None:
+        plt.savefig(save_path, dpi=300, bbox_inches="tight")
+    if show_plot:
+        plt.show()
+    else:
+        plt.close(fig)
+    return fig, ax

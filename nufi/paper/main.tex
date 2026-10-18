@@ -201,6 +201,30 @@ NUFI achieves competitive reconstruction error while rigorously preserving the e
 
 ---
 
+\section{Clinical MNAR Sensitivity: Spectral Pattern Mixture Models, Reference-Based MI and Tipping Point Analysis}
+\label{sec:mnar}
+
+In longitudinal clinical trials analysed under ICH E9(R1) estimand frameworks, missingness is frequently \emph{Missing Not At Random} (MNAR) \cite{Diggle1994}. Because NUFI decouples the deterministic continuous-time spectral solve $\tilde{\mathbf{x}}(t)$ from the LDL$^T$ stochastic posterior noise injection $\mathbf{Z}_{\text{scaled}}(t)$, MNAR sensitivity mechanisms can be evaluated across $M$ imputations without re-solving the NUDFT.
+
+\subsection{Continuous-Time Spectral Pattern Mixture Models}
+For a subject discontinuing at $t_d$, NUFI supports pattern-mixture adjustments applied strictly to missing observations:
+\begin{equation}
+x_{\text{PMM}}(t) = \tilde{x}(t) + \delta_{\text{shift}} + \delta_{\text{slope}} \cdot \max(0, t - t_d) + Z_{\text{scaled}}(t), \quad t > t_d,
+\end{equation}
+preserving $C^0$ boundary continuity at $t_d$ under \texttt{pmm\_slope}, alongside high-frequency attenuation $F_k \mapsto F_k \exp(-|\delta|(f_k/f_{\max})^2)$ under \texttt{spectral\_dampening}.
+
+\subsection{Reference-Based Multiple Imputation (RBMI) and CIR Fourier Integrals}
+Following Carpenter, Roger, and Kenward \cite{Carpenter2013}, NUFI implements Copy Reference (\texttt{CR}), Jump to Reference (\texttt{J2R}), Last Mean Carried Forward (\texttt{LMCF}), and Copy Increments in Reference (\texttt{CIR}). Under \texttt{CIR}, the post-dropout trajectory evolves via the closed-form Fourier integral of the reference arm's derivative:
+\begin{equation}
+x_{\text{CIR}}(t) = x_{\text{act}}(t_d) + \int_{t_d}^{t} \dot{x}_{\text{ref}}(\tau)\,d\tau + Z_{\text{ref}}(t) = x_{\text{act}}(t_d) + \left(\tilde{x}_{\text{ref}}(t) - \tilde{x}_{\text{ref}}(t_d)\right) + Z_{\text{ref}}(t),
+\end{equation}
+maintaining $C^\infty$ smoothness for $t > t_d$ and exact $C^0$ continuity at $t_d$.
+
+\subsection{Vectorized Tipping Point Analysis and Rubin's Rules Pooling}
+Across a 2D sensitivity grid $(\delta_{\text{control}}, \delta_{\text{treatment}})$, treatment effects $\hat{Q}_m$ and within-imputation variances $U_m$ across $M$ posterior draws are pooled via Rubin's Rules \cite{Rubin1987} with the Barnard--Rubin small-sample degrees-of-freedom adjustment \cite{Barnard1999, vanBuuren2011} to locate the tipping boundary $\delta^*$ where $p(\delta^*) \ge \alpha$.
+
+---
+
 \section{Conclusion}
 We presented NUFI, a mathematically rigorous, high-performance, and agent-native library for infilling non-uniformly sampled multi-dimensional time series. By combining a type-1 Fast NUDFT with Tikhonov regularization, stochastic post-hoc covariance correction, automated GCV, and an iterative CG solver, NUFI guarantees continuous derivatives ($C^\infty$) and faithful covariance preservation. Future developments will focus on integrating non-stationary frequency estimators and cooperative multi-agent parallel workflows.
 
@@ -251,6 +275,21 @@ S. van Buuren and K. Groothuis-Oudshoorn.
 G. Golub, M. Heath, and G. Wahba.
 \newblock ``Generalized cross-validation as a method for choosing a good ridge parameter.''
 \newblock {\em Technometrics}, 21(2):215--231, 1979.
+
+\bibitem{Diggle1994}
+P. J. Diggle and M. G. Kenward.
+\newblock ``Informative dropout in longitudinal data analysis.''
+\newblock {\em Journal of the Royal Statistical Society: Series C}, 43(1):49--93, 1994.
+
+\bibitem{Carpenter2013}
+J. R. Carpenter, J. H. Roger, and M. G. Kenward.
+\newblock ``Analysis of longitudinal trials with protocol deviation: a framework for relevant, accessible assumptions, and inference via multiple imputation.''
+\newblock {\em Journal of Biopharmaceutical Statistics}, 23(6):1352--1371, 2013.
+
+\bibitem{Barnard1999}
+J. Barnard and D. B. Rubin.
+\newblock ``Small-sample degrees of freedom with multiple imputation.''
+\newblock {\em Biometrika}, 86(4):948--955, 1999.
 \end{thebibliography}
 
 \end{document}
