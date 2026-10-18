@@ -1473,6 +1473,184 @@ to every missingness event.
 +                 flags.append("MNAR_DROPOUT_SLOPE_BIAS")
 ]]></description>
   </task>
+  <task status="NOT STARTED">
+    <id>51</id>
+    <title>torch_kernels.py:5-17 - Bug: Default MPS device selection breaks the float64/complex128 pipeline on Apple Silicon</title>
+    <description><![CDATA[
+### Location: nonuniform-fourier-infill/nufi/kernels/torch_kernels.py:5-17
+
+**Bug: `get_device()` returns the MPS device on Apple Silicon, but the entire NUFI pipeline is hard-coded to `float64`/`complex128`, which MPS does not support.**
+
+`get_device()` falls back to `torch.device("mps")` whenever `torch.backends.mps.is_available()` is true, ignoring dtype capability. The library unconditionally uses double precision everywhere (e.g. `nufi/impute.py:124` `torch.tensor(v_timestamps, dtype=torch.float64, device=dev)` and `compute_ND_NUDFT` allocating `dtype=torch.complex128`). MPS has no float64 support, so on Apple Silicon every `fit`/`transform` call raises:
+
+    TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework does not support float64. Please use float32 instead.
+
+This alone fails 35 of 37 tests when the suite runs with the stock default device. Only `tests/benchmark.py:70` passes `device="cpu"` explicitly; every other call site relies on the default.
+
+**Fix**: Make device selection dtype-aware. Probe the device with a float64 tensor and fall back to CPU, and/or honor an explicit override (e.g. `NUFI_DEVICE` env var) so CI and Apple Silicon developers can pin the device. Document the behavior in the README.
+
+      if torch.cuda.is_available():
+          return torch.device("cuda")
+      elif torch.backends.mps.is_available():
+-         return torch.device("mps")
++         # MPS does not support float64/complex128, which the NUFI pipeline
++         # hard-codes throughout (torch_kernels.py, impute.py). Probe and fall
++         # back to CPU; NUFI_DEVICE env var overrides for explicit pinning.
++         override = os.environ.get("NUFI_DEVICE")
++         if override:
++             return torch.device(override)
++         try:
++             torch.zeros(1, dtype=torch.float64, device="mps")
++             return torch.device("mps")
++         except (RuntimeError, TypeError):
++             return torch.device("cpu")
+      else:
+          return torch.device("cpu")
+
+**Acceptance**: `PYTHONPATH=. pytest` collects and runs on Apple Silicon without a "Cannot convert a MPS Tensor to float64 dtype" TypeError from the default device.
+]]></description>
+  </task>
+  <task status="NOT STARTED">
+    <id>52</id>
+    <title>torch_kernels.py:376-377 - Bug: valid_mask broadcast failure in solve_tikhonov_nudft when n_f != N_val</title>
+    <description><![CDATA[
+### Location: nonuniform-fourier-infill/nufi/kernels/torch_kernels.py:376-377
+
+**Bug: the frequency-grid mask `~np.isnan(f_k)` is AND-ed into the per-sample mask, but `f_k` has length `n_f` while `timestamps` and `data` have length `N`.**
+
+`nufi/impute.py:164` warns: All GCV candidates failed SVD for column 0. N_val=3 is very small; using n_f=2, alpha=1.0. Whenever the fitted `n_f != N_val` (small datasets, SVD fallback), `solve_tikhonov_nudft` computes shapes `(N,) & (N,) & (n_f,)` and raises:
+
+    ValueError: operands could not be broadcast together with shapes (3,) (2,)
+
+This makes every small-dataset test fail (`test_imputer_numpy`, `test_imputer_pandas`, `test_stochastic_imputation`, `test_stochastic_imputation_multicol`, and the wrapper/RBMI calls that fit on short series).
+
+**Fix**: `f_k` is a frequency axis, not a per-sample vector. Validate it separately and never AND it into the sample mask:
+
+          timestamps = np.asarray(timestamps, dtype=np.float64)
+          data = np.asarray(data, dtype=np.float64)
+          f_k = np.asarray(f_k, dtype=np.float64)
+
+-         valid_mask = ~np.isnan(timestamps) & ~np.isnan(data) & ~np.isnan(f_k)
+-         valid_mask &= ~np.isinf(timestamps) & ~np.isinf(data) & ~np.isinf(f_k)
++         if not np.all(np.isfinite(f_k)):
++             raise ValueError("f_k contains NaN/inf frequency values.")
++         valid_mask = ~np.isnan(timestamps) & ~np.isnan(data)
++         valid_mask &= ~np.isinf(timestamps) & ~np.isinf(data)
+
+**Acceptance**: `test_imputer_numpy`, `test_imputer_pandas`, `test_stochastic_imputation`, and `test_stochastic_imputation_multicol` pass on CPU.
+]]></description>
+  </task>
+  <task status="NOT STARTED">
+    <id>53</id>
+    <title>torch_kernels.py:226-229,251 - Bug: np.cov returns a 0-d array for single-channel input, crashing covariance_compensation ("Input must be 1- or 2-d.")</title>
+    <description><![CDATA[
+### Location: nonuniform-fourier-infill/nufi/kernels/torch_kernels.py:226-229,251
+
+**Bug: `np.cov(flat_data, rowvar=False)` returns a 0-d scalar array (shape `()`) when `flat_data` has exactly one variable column, so `np.diag(covariance_matrix)` raises.**
+
+Reproduced with a single signal (8 samples): `compute_ND_NUDFT` yields one `(8,)` complex tensor, `np.array([concatenate([arr.real, arr.imag])]).T` is `(16, 1)`, and `np.cov(..., rowvar=False)` returns a 0-d array. `np.diag()` then fails at line 229 (and would fail again at line 251):
+
+    ValueError: Input must be 1- or 2-d.
+
+Any single-outcome fit with `covariance_compensation=True` hits this. In particular all four `test_rbmi_dataframe_methods[CR/J2R/CIR/LMCF]` tests fail, because `infill_rbmi_dataframe` fits `NufiImputer()` (default `covariance_compensation=True`) on the 1-column reference-mean trajectory (`nufi/wrappers.py:459` -> `nufi/impute.py:193` -> `covariance_compensation`).
+
+**Fix**: guard with `np.atleast_2d`, and short-circuit the single-channel case (a single channel has no cross-channel covariance to preserve), returning identity LDL^T factors over the doubled real+imag space:
+
+-     covariance_matrix = np.cov(flat_data, rowvar=False)
++     # np.cov returns a 0-d array when there is exactly one variable column
++     # (single-outcome input), which np.diag() cannot consume.
++     covariance_matrix = np.atleast_2d(np.cov(flat_data, rowvar=False))
++     if covariance_matrix.shape == (1, 1):
++         # Single channel: no cross-channel covariance to compensate. Return
++         # identity factors for the doubled (real+imag) space.
++         n = len(X_list)
++         return np.eye(2 * n), np.eye(2 * n), np.arange(n), np.arange(2 * n)
+
+**Acceptance**: `test_rbmi_dataframe_methods[CR]`, `[J2R]`, `[CIR]`, `[LMCF]` pass on CPU; a single-channel `NufiImputer(covariance_compensation=True).fit_transform` no longer raises.
+]]></description>
+  </task>
+  <task status="NOT STARTED">
+    <id>54</id>
+    <title>agent.py:33-41 - Bug: TransformationTracker path guard rejects every log/history path outside the CWD (macOS tempdirs)</title>
+    <description><![CDATA[
+### Location: nonuniform-fourier-infill/nufi/agent.py:33-41
+
+**Bug: `TransformationTracker.__init__` raises `ValueError` unless both `log_path` and `history_dir` realpath-contain within `os.getcwd()`, so any explicitly requested path outside the CWD is rejected - including `tempfile.mkdtemp()` locations.**
+
+On macOS `tempfile.mkdtemp()` returns `/var/folders/...` (a symlink to `/private/var/folders/...`), which is outside the repository CWD, so `os.path.commonpath([safe_root, resolved]) != safe_root` and the tracker raises:
+
+    ValueError: Path /var/folders/.../nufi_test_xxx/transformations.log is outside the allowed directory (possibly on a different drive).
+
+This fails all 11 `tests/test_agent.py` tests that construct a tracker (the `impute_dataframe`, tipping point, and `tracker_*` tests), regardless of their assertions. The guard is a useful safety default for agent-driven writes, but it must not make explicit, user-provided paths unusable.
+
+**Fix**: make the containment rule an opt-in safety default rather than an unconditional rule - e.g. an `allow_outside_cwd` parameter backed by a `NUFI_ALLOW_UNSAFE_PATHS` env var, and/or validate `log_path` containment against the `history_dir` root instead of the CWD. Update `tests/test_agent.py` to either stay inside the CWD or set the flag.
+
+      def __init__(self, log_path: str = "nufi_transformations.log",
+-                  history_dir: str = ".nufi_history"):
++                  history_dir: str = ".nufi_history",
++                  allow_outside_cwd: bool = None):
++         if allow_outside_cwd is None:
++             allow_outside_cwd = os.environ.get(
++                 "NUFI_ALLOW_UNSAFE_PATHS", ""
++             ).strip().lower() in ("1", "true", "yes")
+          safe_root = os.path.realpath(os.getcwd())
+          # Resolve paths and validate immediately:
+          for p in (log_path, history_dir):
++             if allow_outside_cwd:
++                 break
+              resolved = os.path.realpath(p)
+
+**Acceptance**: `tests/test_agent.py` passes on CPU (tracker tests, `impute_dataframe` tests, tipping point test) without weakening the default guard for relative or agent-driven paths.
+]]></description>
+  </task>
+  <task status="NOT STARTED">
+    <id>55</id>
+    <title>tests/benchmark.py:245-258,261-305 - Bug: run_mnar_dropout_benchmark is never invoked from __main__ and only exercises the RBMI-CIR path</title>
+    <description><![CDATA[
+### Location: nonuniform-fourier-infill/tests/benchmark.py:245-258,261-305
+
+**Bug: `run_mnar_dropout_benchmark` (Task 50) is defined but never called, and its scope was reduced relative to the planned Task 46-50 specification.**
+
+The `__main__` block only runs `run_benchmarks` + `print_benchmark_results` and saves the JSON; `run_mnar_dropout_benchmark` is never invoked anywhere (`grep -rn run_mnar_dropout_benchmark --include="*.py"` matches only its `def` line). Additionally, the implemented benchmark only exercises `infill_rbmi_dataframe(rbmi_method="CIR", n_imputations=1, stochastic=False)` and reports true effect / estimated effect / absolute bias / runtime, whereas the plan specified a three-way comparison - naive MAR `NufiImputer`, `NufiImputer(mnar_strategy="pmm_slope")`, and `infill_rbmi_dataframe(..., rbmi_method="CIR")` - reporting treatment-effect bias, RMSE, covariance error, and runtime.
+
+**Fix**: wire the MNAR benchmark into `__main__` and extend it to the planned comparison.
+
+      if __name__ == "__main__":
+          benchmark_results = run_benchmarks(n_samples=250, n_channels=4, missing_rate=0.3)
+          print_benchmark_results(benchmark_results)
++         mnar_results = run_mnar_dropout_benchmark(n_subjects_per_arm=30, n_visits=8)
++         print(json.dumps(mnar_results, indent=4))
++         benchmark_results["MNAR Dropout"] = mnar_results
+
+and inside `run_mnar_dropout_benchmark`, add the MAR and PMM arms alongside RBMI-CIR, each scored against the simulated truth (`truth[subj]` final visit) with `abs(theta_hat - theta_true)`, RMSE, covariance Frobenius error, and runtime.
+
+**Acceptance**: `python tests/benchmark.py` prints and saves the MNAR dropout section, containing naive-MAR, `pmm_slope`, and RBMI-CIR rows with bias / RMSE / covariance-error / runtime columns.
+]]></description>
+  </task>
+  <task status="NOT STARTED">
+    <id>56</id>
+    <title>tests/test_agent.py:291-320 - Fragile assertion: the "zero redundant solves" counter is never asserted non-zero, so the grid-independence check can pass vacuously after an import-style refactor</title>
+    <description><![CDATA[
+### Location: nonuniform-fourier-infill/tests/test_agent.py:291-320
+
+**Fragile assertion: `test_tipping_point_analysis_and_plot` asserts only `small_calls == big_calls` and never asserts the counter is greater than zero.**
+
+Correction to an earlier review note: the patch target IS currently effective. `nufi/impute.py:245-246` re-imports `solve_tikhonov_nudft` inside `transform()` at call time (`from nufi.kernels.torch_kernels import solve_tikhonov_nudft`), so patching `nufi.kernels.torch_kernels.solve_tikhonov_nudft` DOES intercept the per-arm solves (2 calls per analysis: one transform per arm with one outcome column). `small_calls == big_calls` is therefore currently a genuine 2 == 2 comparison, not a 0 == 0 one.
+
+However, the test never asserts `counter["n"] > 0`. If a future refactor hoists that import to `nufi/impute.py` module level (a natural cleanup), `transform()` would bind the unpatched name at import time, the patch would stop intercepting, the counter would silently drop to 0, and `0 == 0` would still pass - exactly the vacuous scenario this check exists to prevent. The test also cannot currently run on macOS at all (Task 54 tracker guard), so the counter path is unexercised in practice.
+
+**Fix**: assert a non-zero, grid-size-independent budget:
+
+          self.assertEqual(small_calls, big_calls)
++         # One transform per arm (one outcome column each): the count must be
++         # non-zero AND independent of the delta-grid size (2x2 vs 2x9).
++         self.assertGreaterEqual(small_calls, 2)
++         self.assertLessEqual(big_calls, 8)
+          self.assertEqual(res_big["treatment_effects"].shape, (2, 9))
+
+**Acceptance**: with a deliberate regression that re-solves the NUDFT inside the delta-grid loop the test fails; with the current implementation it passes with a non-zero count; and hoisting the `transform()` import to module level can no longer silently neutralize the check.
+]]></description>
+  </task>
 </tasklist>
 
 ```
