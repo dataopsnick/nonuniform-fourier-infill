@@ -408,6 +408,15 @@ def impute_dataframe(
         nyquist_frequency = max_sampling_rate / 2.0
         f_k = np.linspace(0, nyquist_frequency, n_f)
 
+        # Task 62: prefer the imputer's actual fitted per-column frequency grid
+        # (a conjugate-symmetric low-bandwidth grid when n_frequencies=None) so
+        # the PSD / derivative diagnostics below are evaluated on the same
+        # spectral basis the coefficients were solved on.
+        fitted_f_k = getattr(imputer, 'frequencies_', None)
+        if isinstance(fitted_f_k, dict) and col_idx in fitted_f_k:
+            f_k = np.asarray(fitted_f_k[col_idx], dtype=np.float64)
+            n_f = int(f_k.size)
+
         if len(v_data) > 0 and hasattr(imputer, 'reconstructed_') and col_idx in imputer.reconstructed_:
             recon_valid = np.asarray(imputer.reconstructed_[col_idx])[valid_mask]
             valid_ts = np.asarray(timestamps)[valid_mask]
@@ -569,6 +578,15 @@ def plot_diagnostics(
     orig_copy = original_df.copy()
     inf_copy = infilled_df.copy()
 
+    # Task 59: validate the diagnostics payload upfront so malformed metadata
+    # fails fast with a clear TypeError instead of an AttributeError deep in
+    # the plotting loop (e.g. diagnostics={"signal": None}).
+    if not isinstance(diagnostics, dict):
+        raise TypeError(
+            f"diagnostics must be a dict mapping column names to per-column "
+            f"diagnostic dicts, got {type(diagnostics).__name__}."
+        )
+
     if time_col is not None:
         orig_copy = orig_copy.set_index(time_col)
         inf_copy = inf_copy.set_index(time_col)
@@ -635,6 +653,13 @@ def plot_diagnostics(
         orig_data = orig_copy[col_name].to_numpy()
         inf_data = inf_copy[col_name].to_numpy()
         diag = diagnostics.get(col_name, {})
+        # Task 59: reject non-dict per-column entries (e.g. None) with a clear
+        # TypeError instead of an AttributeError on diag.get(...) below.
+        if not isinstance(diag, dict):
+            raise TypeError(
+                f"diagnostics[{col_name!r}] must be a dict, got "
+                f"{type(diag).__name__}."
+            )
 
         # Plot 1: Time Domain Reconstruction
         ax_time = axes[idx, 0]
@@ -824,7 +849,15 @@ def run_tipping_point_analysis(
         wide = pd.DataFrame(
             {"time": t_vals, "subject": subj_vals, "value": arm_df[outcome_col].to_numpy(dtype=np.float64)}
         )
-        pivot = wide.pivot_table(index="time", columns="subject", values="value", aggfunc="mean").sort_index()
+        # Task 57: pivot_table defaults to dropna=True, which silently drops the
+        # all-NaN post-dropout time rows — the missing region then vanishes from
+        # `matrix`/`miss_mask`, the MNAR pattern-mixture offsets are all zero,
+        # the delta grid has no effect on the pooled treatment effects, and
+        # `tipping_point` is always None. Pass dropna=False so the all-NaN time
+        # rows are preserved (all-NaN subject columns are still dropped below).
+        pivot = wide.pivot_table(
+            index="time", columns="subject", values="value", aggfunc="mean", dropna=False
+        ).sort_index()
         pivot = pivot.dropna(axis=1, how="all")
         if pivot.empty:
             raise ValueError(f"Arm {arm_label!r} has no observed outcome values.")

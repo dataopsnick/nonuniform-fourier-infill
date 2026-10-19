@@ -9,6 +9,22 @@ class DatasetObj:
         self.timestamps = timestamps
         self.data = data
 
+def _conjugate_symmetric_grid(f_max, m):
+    """
+    Builds a conjugate-symmetric (Hermitian) frequency grid for real-valued
+    signal reconstruction (Task 62): m non-negative frequencies (including DC)
+    uniformly spaced on [0, f_max], mirrored to negative frequencies, giving
+    2*m - 1 total synthesis modes.
+
+    Real-valued signals need +/- f mode pairs to be representable in the
+    complex synthesis basis exp(+2*pi*i*f*t); a one-sided grid on [0, f_max]
+    cannot fit them, while a two-sided bounded-bandwidth grid keeps the
+    least-squares system overdetermined and well-conditioned across
+    contiguous missing gaps.
+    """
+    base = np.linspace(0.0, float(f_max), int(m))
+    return np.concatenate([-base[1:][::-1], base])
+
 class NufiImputer(BaseEstimator, TransformerMixin):
     """
     NufiImputer uses Non-Uniform Discrete Fourier Transforms (NUDFT) to infill
@@ -36,6 +52,9 @@ class NufiImputer(BaseEstimator, TransformerMixin):
         self.perm_ = None
         self.alphas_ = []
         self.n_frequencies_ = []
+        # Task 62: per-column fitted frequency grids (the exact grids GCV tuned
+        # in fit(), reused by transform() to evaluate the same spectral model).
+        self.frequency_grids_ = {}
         
     def clone(self):
         """Returns a fresh unfitted clone of this imputer with the same parameters."""
@@ -75,6 +94,20 @@ class NufiImputer(BaseEstimator, TransformerMixin):
         """
         from nufi.kernels.torch_kernels import optimize_alpha_gcv, compute_gcv_from_svd
         
+        # Task 61: validate the regularization hyperparameter upfront so that
+        # invalid values (zero / negative alpha) fail fast with ValueError
+        # instead of being silently overwritten by the small-system GCV
+        # fallback at the end of the per-column tuning loop below.
+        if self.alpha is not None and self.alpha != 'auto':
+            if (
+                not isinstance(self.alpha, (int, float, np.integer, np.floating))
+                or not float(self.alpha) > 0.0
+            ):
+                raise ValueError(
+                    "Regularization parameter alpha must be a positive number, "
+                    "'auto', or None; got %r." % (self.alpha,)
+                )
+        
         # Convert X to numpy
         if isinstance(X, pd.DataFrame):
             if timestamps is None:
@@ -103,24 +136,50 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                 self.n_frequencies_.append(self.n_frequencies if isinstance(self.n_frequencies, int) else len(X_data))
                 continue
             
-            # Decide n_frequencies for this column
+            # Sort valid timestamps once; the Nyquist bandwidth and the
+            # observation-window span drive the default grid selection below.
+            v_timestamps, v_data, nyquist_frequency = self._sort_and_compute_nyquist(v_timestamps, v_data)
+            if N_val > 1:
+                T_span = float(v_timestamps[-1] - v_timestamps[0])
+            else:
+                T_span = 1.0
+            T_span = max(T_span, 1e-12)
+            
+            # Decide the per-candidate frequency grids for this column (Task 62):
+            # - 'auto': legacy GCV search over uniform n_f grids on [0, nyquist].
+            # - int: legacy single uniform grid with the requested n_frequencies.
+            # - None (default): parsimonious conjugate-symmetric low-bandwidth
+            #   grids. An N_val-point one-sided grid stretched up to the
+            #   min-spacing Nyquist is severely ill-conditioned across
+            #   contiguous missing gaps (Runge/Gibbs blow-up ~112x on smooth
+            #   signals), so the default bounds the bandwidth to a
+            #   GCV-selected cycles-per-window ladder (capped at Nyquist) and
+            #   mirrors it to negative frequencies, keeping the least-squares
+            #   system overdetermined (2*m - 1 <= N_val modes).
             if self.n_frequencies == 'auto':
                 candidates = [max(5, N_val // 4), max(5, N_val // 2), max(5, N_val)]
                 candidates = [c for c in candidates if c <= N_val]  # avoid underdetermined systems
                 if not candidates:
                     candidates = [max(1, N_val)]
                 candidates = sorted(list(set(candidates)))
+                candidate_grids = [np.linspace(0, nyquist_frequency, n_f) for n_f in candidates]
+            elif self.n_frequencies is None:
+                m_modes = max(2, int(np.ceil((N_val - 1) / 2.0)))
+                bandwidths = [c / T_span for c in (1.0, 2.0, 3.0, 4.0, 6.0, 8.0)]
+                bandwidths = [b for b in bandwidths if b <= nyquist_frequency]
+                if not bandwidths:
+                    bandwidths = [nyquist_frequency]
+                candidate_grids = [_conjugate_symmetric_grid(b, m_modes) for b in bandwidths]
             else:
-                candidates = [self.n_frequencies if self.n_frequencies is not None else N_val]
-                
-            best_n_freq = candidates[0]
+                candidate_grids = [np.linspace(0, nyquist_frequency, int(self.n_frequencies))]
+            
+            best_grid = np.asarray(candidate_grids[0], dtype=np.float64)
+            best_n_freq = int(best_grid.size)
             best_alpha = self.alpha if isinstance(self.alpha, (int, float)) else 1e-4
             best_gcv = float('inf')
             
-            v_timestamps, v_data, nyquist_frequency = self._sort_and_compute_nyquist(v_timestamps, v_data)
-            
-            for n_f in candidates:
-                f_k = np.linspace(0, nyquist_frequency, n_f)
+            for f_k_cand in candidate_grids:
+                f_k = np.asarray(f_k_cand, dtype=np.float64)
                 t_timestamps = torch.tensor(v_timestamps, dtype=torch.float64, device=dev)
                 t_f_k = torch.tensor(f_k, dtype=torch.float64, device=dev)
                 t_data = torch.tensor(v_data, dtype=torch.float64, device=dev)
@@ -152,19 +211,30 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                         y_norm_sq = torch.sum(torch.abs(y_complex) ** 2)
                 except (RuntimeError, torch.linalg.LinAlgError, ValueError) as e:
                     import warnings
-                    warnings.warn(f"SVD failed for column {col_idx}, n_f={n_f}: {e}. Skipping candidate.")
+                    warnings.warn(f"SVD failed for column {col_idx}, n_f={f_k.size}: {e}. Skipping candidate.")
                     continue
                 
                 score = compute_gcv_from_svd(S, y_tilde, y_norm_sq, opt_alpha, N_val)
                 
                 if score < best_gcv:
                     best_gcv = score
-                    best_n_freq = n_f
+                    best_grid = f_k
+                    best_n_freq = int(f_k.size)
                     best_alpha = opt_alpha
             
             if best_gcv == float('inf'):
                 import warnings
-                best_n_freq = max(1, min(5, N_val - 1)) # ensure n_f < N_val to avoid underdetermined system
+                if self.n_frequencies is None:
+                    # Task 62: keep the protective small-system fallback, but on
+                    # the parsimonious conjugate-symmetric default grid family.
+                    m_fb = max(2, min(3, (N_val + 1) // 2))
+                    best_grid = _conjugate_symmetric_grid(
+                        min(nyquist_frequency, 4.0 / T_span), m_fb
+                    )
+                else:
+                    # ensure n_f < N_val to avoid underdetermined system
+                    best_grid = np.linspace(0, nyquist_frequency, max(1, min(5, N_val - 1)))
+                best_n_freq = int(np.asarray(best_grid).size)
                 best_alpha = 1.0
                 warnings.warn(
                     f"All GCV candidates failed SVD for column {col_idx}. "
@@ -172,6 +242,9 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                 )
             self.alphas_.append(best_alpha)
             self.n_frequencies_.append(best_n_freq)
+            # Task 62: persist the exact fitted grid so transform() evaluates the
+            # same spectral model GCV tuned here.
+            self.frequency_grids_[col_idx] = np.asarray(best_grid, dtype=np.float64)
             
         # Build X_list of DatasetObj for covariance computation (excluding all-NaN columns)
         valid_cols = []
@@ -274,7 +347,16 @@ class NufiImputer(BaseEstimator, TransformerMixin):
         else:
             X_data = np.array(X).copy()
             if timestamps is None:
-                timestamps = np.arange(len(X_data), dtype=np.float64)
+                # Task 62: for array input fitted with explicit timestamps (e.g.
+                # sklearn's fit_transform(X, timestamps=t) passes timestamps to
+                # fit() but not to transform()), reuse the fitted time base
+                # instead of silently re-basing to arange(len(X)) and evaluating
+                # the fitted spectral model at garbage phases.
+                fitted_ts = getattr(self, "timestamps_", None)
+                if fitted_ts is not None and len(fitted_ts) == len(X_data):
+                    timestamps = np.asarray(fitted_ts, dtype=np.float64)
+                else:
+                    timestamps = np.arange(len(X_data), dtype=np.float64)
             column_names = None
 
         t_timestamps = np.array(timestamps, dtype=np.float64)
@@ -315,7 +397,16 @@ class NufiImputer(BaseEstimator, TransformerMixin):
                 n_f = n_samples
 
             v_ts, v_dat, nyq = self._sort_and_compute_nyquist(v_timestamps, v_data)
-            f_k = np.linspace(0, nyq, n_f)
+            # Task 62: reuse the exact per-column frequency grid fitted in fit()
+            # (the conjugate-symmetric low-bandwidth grid when n_frequencies=None)
+            # so transform() evaluates the same spectral model that GCV tuned,
+            # instead of rebuilding a fresh grid from the transform-time timestamps.
+            fitted_grids = getattr(self, "frequency_grids_", None)
+            if isinstance(fitted_grids, dict) and col_idx in fitted_grids:
+                f_k = np.asarray(fitted_grids[col_idx], dtype=np.float64)
+                n_f = int(f_k.size)
+            else:
+                f_k = np.linspace(0, nyq, n_f)
 
             # Solve regularized system for continuous NUDFT spectrum F
             try:
@@ -388,7 +479,9 @@ class NufiImputer(BaseEstimator, TransformerMixin):
             eta = rng.normal(0, 1.0, size=eta_shape)
             T = self.noise_transform_
             if T is not None:
-                Z_vars = np.diag(T @ T.T)
+                # Task 57: np.diag() returns a read-only view in NumPy 2.x; copy
+                # before the in-place zero-variance replacement below.
+                Z_vars = np.diag(T @ T.T).copy()
                 Z_vars[Z_vars == 0] = 1.0
                 if n_imputations > 1:
                     Z = np.einsum("msc,dc->msd", eta, T)
@@ -506,7 +599,9 @@ class NufiImputer(BaseEstimator, TransformerMixin):
         eta = rng.normal(0, 1.0, size=shape)
         T = self.noise_transform_
         if T is not None:
-            Z_vars = np.diag(T @ T.T)
+            # Task 57: np.diag() returns a read-only view in NumPy 2.x; copy
+            # before the in-place zero-variance replacement below.
+            Z_vars = np.diag(T @ T.T).copy()
             Z_vars[Z_vars == 0] = 1.0
             if n_imputations > 1:
                 Z = np.einsum("msc,dc->msd", eta, T)

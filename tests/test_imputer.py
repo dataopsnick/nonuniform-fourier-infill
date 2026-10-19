@@ -18,14 +18,16 @@ def test_infill_dataframe_wrapper():
     assert not df_filled.isna().any().any()
     assert len(df_filled) == len(df)
     assert 'timestamp' not in df_filled.columns
-    # Verify observed values are preserved
-    assert df_filled.loc[0, 'signal'] == 10.0
-    assert df_filled.loc[2, 'signal'] == 30.0
+    # Verify observed values are preserved.
+    # NOTE: infill_dataframe promotes time_col to the DataFrame index, so rows
+    # must be addressed positionally with .iloc (labels are timestamps now).
+    assert df_filled['signal'].iloc[0] == 10.0
+    assert df_filled['signal'].iloc[2] == 30.0
     # Sanity: filled values should be within a reasonable range of observed data
-    assert 5.0 <= df_filled.loc[1, 'signal'] <= 35.0, (
-        f"Filled value {df_filled.loc[1, 'signal']} is far outside observed range [10, 30]"
+    assert 5.0 <= df_filled['signal'].iloc[1] <= 35.0, (
+        f"Filled value {df_filled['signal'].iloc[1]} is far outside observed range [10, 30]"
     )
-    assert 5.0 <= df_filled.loc[3, 'signal'] <= 35.0
+    assert 5.0 <= df_filled['signal'].iloc[3] <= 35.0
     
     # Infill keeping time_col as feature
     df_filled_keep = infill_dataframe(df, time_col='timestamp', keep_time_col=True)

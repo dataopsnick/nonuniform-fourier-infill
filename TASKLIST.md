@@ -1,6 +1,6 @@
 ```xml
 <tasklist>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>57</id>
     <title>impute.py:354,462 - Bug: np.diag() returns a read-only view in NumPy 2.x, crashing correlated posterior noise sampling</title>
     <description><![CDATA[
@@ -48,7 +48,7 @@ Copy the diagonal array (or use `np.where`) before mutating `Z_vars` in both `tr
 All 6 tests (`test_stochastic_imputation_multicol`, `test_rbmi_dataframe_methods[CR/J2R/CIR/LMCF]`, and `test_tipping_point_analysis_and_plot`) pass.
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>58</id>
     <title>test_agent.py:80-83 - Bug: test_impute_dataframe_zero_config checks for .csv snapshots instead of .parquet</title>
     <description><![CDATA[
@@ -85,7 +85,7 @@ Update `test_impute_dataframe_zero_config` in `tests/test_agent.py` to check for
 `PYTHONPATH=. pytest tests/test_agent.py -k "test_impute_dataframe_zero_config"` passes.
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>59</id>
     <title>agent.py:505 - Bug: plot_diagnostics raises unhandled AttributeError when column diagnostics entry is None</title>
     <description><![CDATA[
@@ -121,7 +121,7 @@ In `nufi/agent.py:505`, normalize `diag` so non-dict values either raise `TypeEr
 `PYTHONPATH=. pytest tests/test_agent.py -k "test_plot_diagnostics_bad_input"` passes, and `PYTHONPATH=. pytest tests/test_agent.py` passes 100% (12/12).
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>60</id>
     <title>test_imputer.py:22-29 - Bug: test_infill_dataframe_wrapper indexes timestamp-indexed DataFrame with integer row labels 0, 1, 2, 3</title>
     <description><![CDATA[
@@ -163,7 +163,7 @@ Use positional indexing `df_filled['signal'].iloc[...]` (or the actual timestamp
 `PYTHONPATH=. pytest tests/test_imputer.py -k "test_infill_dataframe_wrapper"` passes.
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>61</id>
     <title>impute.py:92 - Bug: NufiImputer.fit() does not validate positive alpha, failing test_imputer_edge_cases when GCV score is inf</title>
     <description><![CDATA[
@@ -203,7 +203,7 @@ Validate `self.alpha` at the beginning of `NufiImputer.fit()`: if `self.alpha !=
 `PYTHONPATH=. pytest tests/test_imputer.py -k "test_imputer_edge_cases"` passes, and `PYTHONPATH=. pytest tests/test_imputer.py` passes 100% (12/12).
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>62</id>
     <title>impute.py:114-125,297-315 - Bug: Overcomplete one-sided Nyquist frequency grid (n_f = N_val) with weak default alpha=1e-4 causes severe Gibbs/Runge blow-up (~112x) in gaps</title>
     <description><![CDATA[
@@ -228,7 +228,7 @@ All 4 tests in `tests/test_covariance.py` (`test_derivative_continuity[direct|cg
 `PYTHONPATH=. pytest tests/test_covariance.py -v` passes all 4 parametrized tests (`test_derivative_continuity[direct|cg]` and `test_covariance_preservation[direct|cg]`).
 ]]></description>
   </task>
-  <task status="NOT STARTED">
+  <task status="COMPLETED">
     <id>63</id>
     <title>pyproject.toml:22-27 & requirements.txt - Bug: Missing pyarrow dependency required by TransformationTracker.save_snapshot</title>
     <description><![CDATA[
