@@ -77,10 +77,10 @@ class TestAgentNativeLayer(unittest.TestCase):
         self.assertTrue(os.path.exists(self.test_log))
         self.assertTrue(os.path.exists(self.test_history))
         
-        # Count snapshot files (.csv)
+        # Count snapshot files (.parquet)
         files = os.listdir(self.test_history)
-        csv_files = [f for f in files if f.endswith(".csv")]
-        self.assertGreaterEqual(len(csv_files), 2, f"Expected at least 2 CSV snapshots, got: {csv_files}")
+        parquet_files = [f for f in files if f.endswith(".parquet")]
+        self.assertGreaterEqual(len(parquet_files), 2, f"Expected at least 2 parquet snapshots, got: {parquet_files}")
 
     def test_impute_dataframe_empty(self):
         """Edge case: empty DataFrame should raise ValueError."""
@@ -341,10 +341,14 @@ class TestAgentNativeLayer(unittest.TestCase):
             big_calls = counter["n"]
 
         self.assertEqual(small_calls, big_calls)
-        # One transform per arm (one outcome column each): the count must be
-        # non-zero AND independent of the delta-grid size (2x2 vs 2x9).
+        # One transform per arm; NufiImputer.transform solves one spectral
+        # system per (subject) outcome column: 2 arms x 6 subject columns =
+        # 12 solves, independent of the delta-grid size (2x2 vs 2x9).
+        # Bound defensively at 2x the expected count so a per-delta re-solve
+        # regression (>= 2*9*6 calls) still trips it.
+        n_subject_cols = df["subject"].nunique() // 2
         self.assertGreaterEqual(small_calls, 2)
-        self.assertLessEqual(big_calls, 8)
+        self.assertLessEqual(big_calls, 4 * n_subject_cols)
         self.assertEqual(res_big["treatment_effects"].shape, (2, 9))
         self.assertIsNotNone(res_big["tipping_point"])
 
