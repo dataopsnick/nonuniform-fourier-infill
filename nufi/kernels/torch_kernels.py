@@ -1,3 +1,4 @@
+import os
 import torch
 import numpy as np
 import scipy.linalg
@@ -5,14 +6,28 @@ import scipy.linalg
 def get_device(device_str=None):
     """
     Selects the acceleration device (CUDA, MPS, or CPU).
+
+    The ``NUFI_DEVICE`` environment variable pins the device explicitly (e.g.
+    ``NUFI_DEVICE=cpu``), which is useful for CI or when a specific backend is
+    required. On Apple Silicon the MPS backend is probed for float64 support
+    because the NUFI pipeline hard-codes float64/complex128 throughout
+    (torch_kernels.py, impute.py); if the probe fails, CPU is used instead.
     """
     if device_str is not None:
         return torch.device(device_str)
-    
+
+    override = os.environ.get("NUFI_DEVICE")
+    if override:
+        return torch.device(override)
+
     if torch.cuda.is_available():
         return torch.device("cuda")
     elif torch.backends.mps.is_available():
-        return torch.device("mps")
+        try:
+            torch.zeros(1, dtype=torch.float64, device="mps")
+            return torch.device("mps")
+        except (RuntimeError, TypeError):
+            return torch.device("cpu")
     else:
         return torch.device("cpu")
 
@@ -223,7 +238,14 @@ def covariance_compensation(X_list, device=None):
     flat_data = np.array(flat_data).T # Shape: samples x dimensions
     # Step 3: Compute covariance matrix
     # Shape: (num_samples, num_dimensions)
-    covariance_matrix = np.cov(flat_data, rowvar=False)
+    # np.cov returns a 0-d array when there is exactly one variable column
+    # (single-outcome input), which np.diag() cannot consume.
+    covariance_matrix = np.atleast_2d(np.cov(flat_data, rowvar=False))
+    if covariance_matrix.shape == (1, 1):
+        # Single channel: no cross-channel covariance to compensate. Return
+        # identity factors for the doubled (real+imag) space.
+        n = len(X_list)
+        return np.eye(2 * n), np.eye(2 * n), np.arange(n), np.arange(2 * n)
 
     # Detect degenerate columns on the diagonal of the covariance matrix
     diag = np.diag(covariance_matrix)
@@ -373,10 +395,12 @@ def solve_tikhonov_nudft(timestamps, data, f_k, alpha, solver='direct', max_iter
     data = np.asarray(data, dtype=np.float64)
     f_k = np.asarray(f_k, dtype=np.float64)
     
-    valid_mask = ~np.isnan(timestamps) & ~np.isnan(data) & ~np.isnan(f_k)
-    valid_mask &= ~np.isinf(timestamps) & ~np.isinf(data) & ~np.isinf(f_k)
+    if not np.all(np.isfinite(f_k)):
+        raise ValueError("f_k contains NaN/inf frequency values.")
+    valid_mask = ~np.isnan(timestamps) & ~np.isnan(data)
+    valid_mask &= ~np.isinf(timestamps) & ~np.isinf(data)
     if not np.all(valid_mask):
-        raise ValueError("Input timestamps, data, or f_k contain NaN/Inf values.")
+        raise ValueError("Input timestamps or data contain NaN/Inf values.")
 
     t_timestamps = torch.tensor(timestamps, dtype=torch.float64, device=dev)
     t_data = torch.tensor(data, dtype=torch.float64, device=dev)

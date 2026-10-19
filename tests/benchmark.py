@@ -242,9 +242,164 @@ def print_benchmark_results(results: dict):
             print(f"| {method:<20} | {status:<49} |")
     print("=" * 80 + "\n")
 
+def print_mnar_benchmark_results(results: dict):
+    """Prints the MNAR dropout benchmark three-way comparison as a Markdown table."""
+    print("\n" + "=" * 96)
+    print("              nufi MNAR DROPOUT BENCHMARK (three-way comparison)")
+    print("=" * 96)
+    print(f"True treatment effect: {results['True Effect']:.5f}\n")
+    header = "| {:<28} | {:<10} | {:<10} | {:<14} | {:<12} |".format(
+        "Method", "Bias", "RMSE", "Cov Error", "Runtime (s)"
+    )
+    print(header)
+    print("| {:<28} | {:<10} | {:<10} | {:<14} | {:<12} |".format(
+        "-" * 28, "-" * 10, "-" * 10, "-" * 14, "-" * 12
+    ))
+    for name, metrics in results.items():
+        if not isinstance(metrics, dict) or "Absolute Bias" not in metrics:
+            continue
+        print("| {:<28} | {:<10.5f} | {:<10.5f} | {:<14.5f} | {:<12.5f} |".format(
+            name,
+            metrics["Absolute Bias"],
+            metrics["RMSE"],
+            metrics["Covariance Error (Frobenius)"],
+            metrics["Runtime (s)"],
+        ))
+    print("=" * 96 + "\n")
+
+
+def _mnar_score(infilled_long, truth, missing, true_effect, final_t):
+    """Scores an infilled long-format MNAR DataFrame against simulated truth.
+
+    Returns treatment-effect bias, RMSE over the post-dropout (missing) cells,
+    and Frobenius covariance error between the two arms' final-visit outcomes.
+    """
+    def _final_by_arm(arm):
+        mask = (infilled_long["arm"] == arm) & (infilled_long["time"] == final_t)
+        return infilled_long.loc[mask, "outcome"].to_numpy(dtype=float)
+
+    est_effect = float(np.mean(_final_by_arm("Treatment")) - np.mean(_final_by_arm("Control")))
+    bias = abs(est_effect - true_effect)
+
+    total_sq, n = 0.0, 0
+    for subj, traj in truth.items():
+        sub = infilled_long[infilled_long["subject"] == subj].sort_values("time")
+        pred = sub["outcome"].to_numpy(dtype=float)
+        for i in missing[subj]:
+            total_sq += (pred[i] - traj[i]) ** 2
+            n += 1
+    rmse = float(np.sqrt(total_sq / max(n, 1)))
+
+    control_subs = sorted(k for k in truth if k.startswith("Control"))
+    treatment_subs = sorted(k for k in truth if k.startswith("Treatment"))
+    true_cov = np.cov(
+        np.array([truth[k][-1] for k in control_subs]),
+        np.array([truth[k][-1] for k in treatment_subs]),
+    )
+    final_by_subj = {
+        row.subject: row.outcome
+        for row in infilled_long[infilled_long["time"] == final_t].itertuples(index=False)
+    }
+    est_cov = np.cov(
+        np.array([final_by_subj[k] for k in control_subs]),
+        np.array([final_by_subj[k] for k in treatment_subs]),
+    )
+    cov_err = float(np.linalg.norm(true_cov - est_cov, ord="fro"))
+
+    return {
+        "Estimated Effect": est_effect,
+        "Absolute Bias": bias,
+        "RMSE": rmse,
+        "Covariance Error (Frobenius)": cov_err,
+    }
+
+
+def run_mnar_dropout_benchmark(n_subjects_per_arm: int = 30, n_visits: int = 8, seed: int = 42) -> dict:
+    """Three-way MNAR dropout comparison (Tasks 50/55).
+
+    Compares naive MAR ``NufiImputer``, ``NufiImputer(mnar_strategy="pmm_slope")``,
+    and ``infill_rbmi_dataframe(rbmi_method="CIR")``, each scored against the
+    simulated truth with treatment-effect bias, RMSE, covariance error, and runtime.
+    """
+    from nufi.wrappers import infill_rbmi_dataframe
+
+    rng = np.random.RandomState(seed)
+    times = np.arange(n_visits, dtype=float)
+    final_t = times[-1]
+    records, truth, missing = [], {}, {}
+    for arm, effect in (("Control", 0.0), ("Treatment", -0.6)):
+        for s in range(n_subjects_per_arm):
+            subj = f"{arm}_{s}"
+            traj = 0.15 * times + effect * (times / max(1.0, n_visits - 1)) + rng.normal(0, 0.15, n_visits)
+            # Reference-based MNAR setup: only the active (treatment) arm is
+            # subject to informative dropout; the reference arm stays complete.
+            if arm == "Treatment":
+                threshold = np.percentile(traj, 65)
+                drop_idx = next((i for i in range(2, n_visits) if traj[i] > threshold), n_visits)
+            else:
+                drop_idx = n_visits
+            truth[subj] = traj
+            missing[subj] = list(range(drop_idx, n_visits))
+            for i in range(n_visits):
+                records.append({
+                    "subject": subj, "arm": arm, "time": times[i],
+                    "outcome": traj[i] if i < drop_idx else np.nan,
+                })
+    long_df = pd.DataFrame(records)
+    true_effect = float(
+        np.mean([v[-1] for k, v in truth.items() if k.startswith("Treatment")])
+        - np.mean([v[-1] for k, v in truth.items() if k.startswith("Control")])
+    )
+
+    def _infill_per_subject(imputer_factory):
+        """Runs a per-subject NufiImputer over each (n_visits, 1) outcome series."""
+        pieces = []
+        for subj, traj in truth.items():
+            sub = long_df[long_df["subject"] == subj].sort_values("time").reset_index(drop=True)
+            y = sub["outcome"].to_numpy(dtype=float).reshape(-1, 1)
+            imputer = imputer_factory()
+            imputer.fit(y, timestamps=times)
+            sub["outcome"] = imputer.transform(y, timestamps=times).ravel()
+            pieces.append(sub)
+        return pd.concat(pieces, ignore_index=True)
+
+    methods = {
+        "Naive MAR (NufiImputer)": lambda: _infill_per_subject(
+            lambda: NufiImputer(random_state=seed)
+        ),
+        "PMM Slope (NufiImputer)": lambda: _infill_per_subject(
+            lambda: NufiImputer(mnar_strategy="pmm_slope", random_state=seed)
+        ),
+        "RBMI CIR (infill_rbmi_dataframe)": lambda: infill_rbmi_dataframe(
+            long_df, arm_col="arm", reference_arm="Control",
+            subject_col="subject", time_col="time",
+            rbmi_method="CIR", n_imputations=1, stochastic=False,
+        ),
+    }
+
+    results = {
+        "True Effect": true_effect,
+        "n_subjects_per_arm": n_subjects_per_arm,
+        "n_visits": n_visits,
+    }
+    for name, run in methods.items():
+        start = time.time()
+        infilled = run()
+        runtime = float(time.time() - start)
+        metrics = _mnar_score(infilled, truth, missing, true_effect, final_t)
+        metrics["Runtime (s)"] = runtime
+        results[name] = metrics
+
+    return results
+
+
 if __name__ == "__main__":
     benchmark_results = run_benchmarks(n_samples=250, n_channels=4, missing_rate=0.3)
     print_benchmark_results(benchmark_results)
+
+    mnar_results = run_mnar_dropout_benchmark(n_subjects_per_arm=30, n_visits=8)
+    print_mnar_benchmark_results(mnar_results)
+    benchmark_results["MNAR Dropout"] = mnar_results
 
     # Save results to disk
     try:
@@ -256,50 +411,3 @@ if __name__ == "__main__":
             print(f"Results saved to {filename}")
     except IOError as e:
         print(f"[WARN] Could not save results to disk: {e}")
-
-
-def run_mnar_dropout_benchmark(n_subjects_per_arm: int = 30, n_visits: int = 8, seed: int = 42) -> dict:
-    """Evaluates treatment effect bias and RMSE under informative MNAR clinical dropout (Task 50)."""
-    from nufi.wrappers import infill_rbmi_dataframe
-
-    rng = np.random.RandomState(seed)
-    times = np.arange(n_visits, dtype=float)
-    records, truth = [], {}
-    for arm, effect in (("Control", 0.0), ("Treatment", -0.6)):
-        for s in range(n_subjects_per_arm):
-            subj = f"{arm}_{s}"
-            traj = 0.15 * times + effect * (times / max(1.0, n_visits - 1)) + rng.normal(0, 0.15, n_visits)
-            threshold = np.percentile(traj, 65)
-            drop_idx = next((i for i in range(2, n_visits) if traj[i] > threshold), n_visits)
-            for i in range(n_visits):
-                records.append({
-                    "subject": subj, "arm": arm, "time": times[i],
-                    "outcome": traj[i] if i < drop_idx else np.nan,
-                })
-            truth[subj] = traj
-    long_df = pd.DataFrame(records)
-    true_effect = float(
-        np.mean([v[-1] for k, v in truth.items() if k.startswith("Treatment")])
-        - np.mean([v[-1] for k, v in truth.items() if k.startswith("Control")])
-    )
-
-    start = time.time()
-    cir_df = infill_rbmi_dataframe(
-        long_df, arm_col="arm", reference_arm="Control",
-        subject_col="subject", time_col="time",
-        rbmi_method="CIR", n_imputations=1, stochastic=False,
-    )
-    cir_time = time.time() - start
-    final_t = times[-1]
-    cir_effect = float(
-        cir_df[(cir_df["arm"] == "Treatment") & (cir_df["time"] == final_t)]["outcome"].mean()
-        - cir_df[(cir_df["arm"] == "Control") & (cir_df["time"] == final_t)]["outcome"].mean()
-    )
-    return {
-        "True Effect": true_effect,
-        "NUFI RBMI-CIR": {
-            "Estimated Effect": cir_effect,
-            "Absolute Bias": abs(cir_effect - true_effect),
-            "Runtime (s)": float(cir_time),
-        },
-    }
