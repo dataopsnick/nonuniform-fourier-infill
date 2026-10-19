@@ -1,5 +1,10 @@
 # Non-Uniform Fourier Infilling (`nufi`)
 
+[![Tests](https://github.com/dataopsnick/nonuniform-fourier-infill/actions/workflows/tests.yml/badge.svg)](https://github.com/dataopsnick/nonuniform-fourier-infill/actions/workflows/tests.yml)
+[![Pytest: 38/38 Passing](https://img.shields.io/badge/pytest-38%2F38%20passing-brightgreen?logo=pytest)](https://github.com/dataopsnick/nonuniform-fourier-infill/actions/workflows/tests.yml)
+[![Python 3.9–3.12](https://img.shields.io/badge/python-3.9--3.12-blue?logo=python&logoColor=white)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 A high-performance, GPU-accelerated (PyTorch/Apple Silicon/CUDA) library for infilling non-uniformly sampled multi-dimensional time-series data using Non-Uniform Discrete Fourier Transforms (NUDFT).
 
 ## 🚀 Strategy & Features
